@@ -1,0 +1,40 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: capitalize;
+}
+
+.draft {
+  background-color: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+}
+
+.submitted {
+  background-color: #e3f2fd;
+  color: var(--color-status-submitted);
+}
+
+.approved, .verified, .active {
+  background-color: var(--color-primary-50);
+  color: var(--color-status-approved);
+}
+
+.rejected, .inactive {
+  background-color: #ffebee;
+  color: var(--color-status-rejected);
+}
+
+.correction, .correction_required {
+  background-color: #fff3e0;
+  color: var(--color-status-correction);
+}
+
+.flagged {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}

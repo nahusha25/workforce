@@ -1,0 +1,5 @@
+[lint]
+select = ["E", "F", "B", "I", "UP", "RUF"]
+
+[lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "app.core.dependencies.require_role", "require_role", "Depends", "Query"]

@@ -1,0 +1,35 @@
+/*
+ * ExceptionBadge.module.css
+ *
+ * Extends the StatusBadge design system tokens (same .badge base) with two
+ * exception-specific severity variants. Using the existing StatusBadge color
+ * palette as anchors:
+ *   critical  → rejected palette (red family, #ffebee background)
+ *   warning   → flagged palette  (amber family, #fef3c7 background)
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  /* inherits text-transform from parent context; no capitalize to preserve casing */
+}
+
+/* ── Critical: attendance/work integrity failures ─────────────────────────── */
+.critical {
+  background-color: #ffebee;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+/* ── Warning: compliance reminders ───────────────────────────────────────── */
+.warning {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}

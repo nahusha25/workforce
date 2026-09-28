@@ -1,0 +1,247 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.gpsStatus {
+  margin-bottom: 20px;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gpsLoading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+  background-color: #f1f5f9;
+  padding: 8px 16px;
+  border-radius: 6px;
+}
+
+.gpsSuccess {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #059669;
+  background-color: #d1fae5;
+  padding: 8px 16px;
+  border-radius: 6px;
+}
+
+.gpsError, .gpsWarning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #dc2626;
+  background-color: #fee2e2;
+  padding: 8px 16px;
+  border-radius: 6px;
+}
+
+.retryBtn {
+  margin-left: 10px;
+}
+
+.spinIcon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.loadingContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 0;
+  color: #64748b;
+  gap: 16px;
+}
+
+.actionsContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.statusPanel {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+}
+
+.statusPanel h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #334155;
+}
+
+.statusIn {
+  color: #059669;
+  font-weight: 700;
+}
+
+.statusOut {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.timeLabel {
+  margin: 8px 0 0 0;
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+.alertError {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background-color: #fef2f2;
+  border-left: 4px solid #ef4444;
+  color: #991b1b;
+  padding: 12px 16px;
+  border-radius: 4px;
+  font-size: 0.95rem;
+}
+
+.alertSuccess {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background-color: #f0fdf4;
+  border-left: 4px solid #22c55e;
+  color: #166534;
+  padding: 12px 16px;
+  border-radius: 4px;
+  font-size: 0.95rem;
+}
+
+.buttonsGroup {
+  display: flex;
+  justify-content: center;
+}
+
+.checkInBtn {
+  font-size: 1.2rem;
+  padding: 16px 24px;
+}
+
+.checkOutBtn {
+  font-size: 1.2rem;
+  padding: 16px 24px;
+}
+
+.btnIcon {
+  margin-right: 8px;
+}
+
+/* Checkout Warning Modal */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modalContent {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  max-width: 500px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.modalHeader h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.closeBtn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.modalBody {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.warningBox {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background-color: #fffbeb;
+  border-left: 4px solid #f59e0b;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #92400e;
+}
+
+.modalDescription {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #475569;
+  line-height: 1.5;
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid #e2e8f0;
+  background-color: #f8fafc;
+}
+

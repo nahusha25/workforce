@@ -1,0 +1,173 @@
+/* AuditHistoryTimeline.module.css */
+
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Each row ─────────────────────────────────────────────────────────────── */
+.item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* ── Left spine: dot + connector line ─────────────────────────────────────── */
+.spineLine {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  width: 28px;
+}
+
+.dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-color: var(--color-neutral-100);
+  border: 2px solid var(--color-neutral-300);
+}
+
+.dot_approved {
+  background-color: var(--color-primary-50);
+  border-color: var(--color-status-approved, #15803d);
+}
+
+.dot_rejected {
+  background-color: #ffebee;
+  border-color: var(--color-status-rejected, #b91c1c);
+}
+
+.dot_correction_required {
+  background-color: #fff3e0;
+  border-color: var(--color-status-correction, #b45309);
+}
+
+.dot_default {
+  background-color: var(--color-neutral-100);
+  border-color: var(--color-neutral-400);
+}
+
+.connector {
+  width: 2px;
+  flex: 1;
+  min-height: var(--space-4);
+  background-color: var(--color-neutral-200);
+  margin: 2px 0;
+}
+
+/* ── Event card ───────────────────────────────────────────────────────────── */
+.card {
+  flex: 1;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-neutral-200);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.actionLabel {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.action_approved {
+  background-color: var(--color-primary-50);
+  color: var(--color-status-approved, #15803d);
+}
+
+.action_rejected {
+  background-color: #ffebee;
+  color: var(--color-status-rejected, #b91c1c);
+}
+
+.action_correction_required {
+  background-color: #fff3e0;
+  color: var(--color-status-correction, #b45309);
+}
+
+.action_default {
+  background-color: var(--color-neutral-100);
+  color: var(--color-neutral-700);
+}
+
+.entityLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-neutral-600);
+}
+
+.timestamp {
+  font-size: var(--font-size-xs);
+  color: var(--color-neutral-500);
+}
+
+.actor {
+  font-size: var(--font-size-xs);
+  color: var(--color-neutral-600);
+  font-style: italic;
+}
+
+.remarks {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-neutral-300);
+  font-size: var(--font-size-xs);
+  color: var(--color-neutral-700);
+  font-style: italic;
+  background-color: var(--color-neutral-50);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* ── Icon colours ─────────────────────────────────────────────────────────── */
+.iconApproved {
+  color: var(--color-status-approved, #15803d);
+}
+
+.iconRejected {
+  color: var(--color-status-rejected, #b91c1c);
+}
+
+.iconCorrection {
+  color: var(--color-status-correction, #b45309);
+}
+
+.iconDefault {
+  color: var(--color-neutral-500);
+}
+
+/* ── Empty / loading state ────────────────────────────────────────────────── */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+  color: var(--color-neutral-500);
+  font-size: var(--font-size-sm);
+}
+
+.emptyIcon {
+  color: var(--color-neutral-400);
+}

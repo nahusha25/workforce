@@ -1,0 +1,42 @@
+# Environments
+.env
+.env.*
+!.env.example
+backend/.env
+
+# Node
+node_modules/
+dist/
+build/
+.npm/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+backend/.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+coverage.xml
+*.cover
+.coverage
+htmlcov/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Project specific
+backend/otp.txt
+frontend/playwright-report/
+frontend/test-results/
+uploads/
+backend/uploads/
+
