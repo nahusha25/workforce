@@ -1367,3 +1367,232 @@ async def test_history_unassigned_supervisor_gets_403():
                 employee_id=worker_emp.id,
                 review_date=env["today"],
             )
+
+
+@pytest.mark.asyncio
+async def test_invalid_state_error_message_format_is_pinned():
+    """Pin the exact exception detail string for InvalidVerificationStateError.
+
+    The frontend relies on the exact template "Cannot {action} record with status '{current_status}'. Target must be submitted."
+    (and specifically the STATE_CONFLICT_MARKER "Target must be submitted.") to distinguish state conflicts
+    from other client errors without relying on fragile guessing.
+    """
+    async with TestingSessionLocal() as session:
+        env = await setup_test_environment(session)
+        dwe = env["daily_work_entry"]
+        sup_user = env["sup_user"]
+        sup_emp = env["sup_emp"]
+        admin_user = env["admin_user"]
+
+        # Case 1: Reject the record first so status becomes 'rejected'
+        await VerificationService.verify_entity(
+            session=session,
+            entity_type="daily_work",
+            entity_id=dwe.id,
+            action="rejected",
+            idempotency_key=str(uuid.uuid4()),
+            supervisor_user_id=sup_user.id,
+            supervisor_emp_id=sup_emp.id,
+            remarks="Rejecting item for invalid state pinning test",
+        )
+        await session.commit()
+
+        # Attempt to approve the already-rejected item -> must raise InvalidVerificationStateError
+        with pytest.raises(InvalidVerificationStateError) as exc_info_approve:
+            await VerificationService.verify_entity(
+                session=session,
+                entity_type="daily_work",
+                entity_id=dwe.id,
+                action="approved",
+                idempotency_key=str(uuid.uuid4()),
+                supervisor_user_id=sup_user.id,
+                supervisor_emp_id=sup_emp.id,
+            )
+
+        expected_msg_approve = "Cannot approved record with status 'rejected'. Target must be submitted."
+        assert exc_info_approve.value.detail == expected_msg_approve
+        assert exc_info_approve.value.status_code == 400
+        assert "Target must be submitted." in exc_info_approve.value.detail
+
+        # Case 2: Admin reopen of an item that is already in 'correction_required' status
+        dwe.status = "correction_required"
+        await session.commit()
+
+        with pytest.raises(InvalidVerificationStateError) as exc_info_reopen:
+            await VerificationService.verify_entity(
+                session=session,
+                entity_type="daily_work",
+                entity_id=dwe.id,
+                action="correction_required",
+                idempotency_key=str(uuid.uuid4()),
+                supervisor_user_id=admin_user.id,
+                remarks="Attempting to reopen an already reopened item",
+                is_admin=True,
+            )
+
+        expected_msg_reopen = "Cannot correction_required record with status 'correction_required'. Target must be submitted."
+        assert exc_info_reopen.value.detail == expected_msg_reopen
+        assert exc_info_reopen.value.status_code == 400
+        assert "Target must be submitted." in exc_info_reopen.value.detail
+
+
+# ── compute_exception_flags draft-scoping tests ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_no_photograph_flag_not_raised_for_draft_work_entry():
+    """A draft work entry with positive quantity and no photo must NOT trigger
+    the no_photograph exception. Only submitted entries are supervisor-relevant.
+    The complementary case (submitted entry with no photo) must still fire.
+    """
+    async with TestingSessionLocal() as session:
+        env = await setup_test_environment(session)
+        worker_emp = env["worker_emp"]
+        site = env["site"]
+        activity = env["activity"]
+        att = env["attendance"]
+        today = env["today"]
+
+        # Draft entry: positive quantity, NO photo.
+        draft_dwe = DailyWorkEntry(
+            idempotency_key=str(uuid.uuid4()),
+            attendance_record_id=att.id,
+            employee_id=worker_emp.id,
+            site_id=site.id,
+            activity_id=activity.id,
+            work_date=today,
+            quantity=10.0,
+            uom=activity.unit_of_measure,
+            status="draft",
+        )
+        session.add(draft_dwe)
+        await session.flush()
+
+        flags = await VerificationService.compute_exception_flags(
+            session=session,
+            employee_id=worker_emp.id,
+            work_date=today,
+            attendance_record=att,
+            work_entries=[draft_dwe],
+            material_transactions=[],
+        )
+
+        assert "no_photograph" not in flags, (
+            "Draft entry without a photo must NOT raise no_photograph — "
+            "the worker hasn't submitted it yet."
+        )
+
+        # Positive case: a submitted entry with no photo MUST fire.
+        submitted_no_photo_dwe = DailyWorkEntry(
+            idempotency_key=str(uuid.uuid4()),
+            attendance_record_id=att.id,
+            employee_id=worker_emp.id,
+            site_id=site.id,
+            activity_id=activity.id,
+            work_date=today,
+            quantity=5.0,
+            uom=activity.unit_of_measure,
+            status="submitted",
+        )
+        session.add(submitted_no_photo_dwe)
+        await session.flush()
+
+        flags_submitted = await VerificationService.compute_exception_flags(
+            session=session,
+            employee_id=worker_emp.id,
+            work_date=today,
+            attendance_record=att,
+            work_entries=[submitted_no_photo_dwe],
+            material_transactions=[],
+        )
+
+        assert "no_photograph" in flags_submitted, (
+            "Submitted entry without a photo MUST raise no_photograph."
+        )
+
+
+@pytest.mark.asyncio
+async def test_high_value_material_flag_not_raised_for_draft_transaction():
+    """A high-value material transaction with status='draft' must NOT trigger
+    high_value_material. Only submitted transactions are supervisor-relevant.
+    The complementary case (submitted high-value transaction) must still fire.
+    """
+    async with TestingSessionLocal() as session:
+        env = await setup_test_environment(session)
+        worker_emp = env["worker_emp"]
+        site = env["site"]
+        activity = env["activity"]
+        material = env["material"]
+        att = env["attendance"]
+        today = env["today"]
+
+        draft_dwe = DailyWorkEntry(
+            idempotency_key=str(uuid.uuid4()),
+            attendance_record_id=att.id,
+            employee_id=worker_emp.id,
+            site_id=site.id,
+            activity_id=activity.id,
+            work_date=today,
+            quantity=1.0,
+            uom=activity.unit_of_measure,
+            status="draft",
+        )
+        session.add(draft_dwe)
+        await session.flush()
+
+        draft_mat = MaterialTransaction(
+            daily_work_entry_id=draft_dwe.id,
+            material_id=material.id,
+            site_id=site.id,
+            transaction_type="purchased",
+            item_name="Expensive Bulk Cable",
+            quantity=1.0,
+            amount=9999.0,
+            is_high_value=True,
+            status="draft",
+        )
+        session.add(draft_mat)
+        await session.flush()
+
+        flags = await VerificationService.compute_exception_flags(
+            session=session,
+            employee_id=worker_emp.id,
+            work_date=today,
+            attendance_record=att,
+            work_entries=[draft_dwe],
+            material_transactions=[draft_mat],
+        )
+
+        assert "high_value_material" not in flags, (
+            "Draft material transaction (is_high_value=True, status='draft') must NOT "
+            "raise high_value_material — the worker hasn't submitted it yet."
+        )
+
+        # Positive case: submitted high-value transaction MUST fire.
+        submitted_mat = MaterialTransaction(
+            daily_work_entry_id=draft_dwe.id,
+            material_id=material.id,
+            site_id=site.id,
+            transaction_type="purchased",
+            item_name="Expensive Bulk Cable (Submitted)",
+            quantity=1.0,
+            amount=9999.0,
+            is_high_value=True,
+            status="submitted",
+        )
+        session.add(submitted_mat)
+        await session.flush()
+
+        flags_submitted = await VerificationService.compute_exception_flags(
+            session=session,
+            employee_id=worker_emp.id,
+            work_date=today,
+            attendance_record=att,
+            work_entries=[draft_dwe],
+            material_transactions=[submitted_mat],
+        )
+
+        assert "high_value_material" in flags_submitted, (
+            "Submitted high-value material transaction MUST raise high_value_material."
+        )
+
+

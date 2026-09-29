@@ -124,8 +124,12 @@ class VerificationService:
         if len(work_entries) > 0 and not attendance_record:
             flags.add("work_without_attendance")
 
-        # 5. Missing photo on positive-quantity work entries
+        # 5. Missing photo on positive-quantity **submitted** work entries.
+        # Draft entries are excluded: the worker hasn't submitted them yet, so
+        # flagging a missing photo before submission would be misleading.
         for entry in work_entries:
+            if entry.status != "submitted":
+                continue
             if entry.quantity and float(entry.quantity) > 0:
                 stmt_photo = select(func.count(WorkPhoto.id)).where(WorkPhoto.daily_work_entry_id == entry.id)
                 res_photo = await session.execute(stmt_photo)
@@ -134,9 +138,12 @@ class VerificationService:
                     flags.add("no_photograph")
                     break
 
-        # 6. High-value material purchase
+        # 6. High-value material purchase on **submitted** transactions.
+        # MaterialTransaction has its own status lifecycle; only submitted
+        # transactions are pending supervisor review, so only those should
+        # surface the high_value_material exception flag.
         for mat in material_transactions:
-            if mat.is_high_value:
+            if mat.status == "submitted" and mat.is_high_value:
                 flags.add("high_value_material")
                 break
 

@@ -13,12 +13,20 @@ export type StatusType =
   | 'inactive'
   | 'flagged';
 
-export type AttendanceStatus = 'draft' | 'flagged' | 'verified' | 'rejected' | 'correction_required';
+export type AttendanceStatus =
+  | 'draft'
+  | 'submitted'
+  | 'flagged'
+  | 'verified'
+  | 'rejected'
+  | 'correction_required';
 
 export function mapAttendanceStatusToBadge(status: string | null | undefined): StatusType {
   switch (status) {
     case 'draft':
       return 'draft';
+    case 'submitted':
+      return 'submitted';
     case 'flagged':
       return 'flagged';
     case 'verified':
@@ -28,7 +36,10 @@ export function mapAttendanceStatusToBadge(status: string | null | undefined): S
     case 'correction_required':
       return 'correction_required';
     default:
-      return 'draft';
+      // Do NOT silently fall back to 'draft' — that hides mapping gaps.
+      // Warn loudly and pass the raw string through so it is visibly wrong.
+      console.warn(`[mapAttendanceStatusToBadge] Unrecognized attendance status: ${JSON.stringify(status)}`);
+      return (status ?? 'unknown') as StatusType;
   }
 }
 
