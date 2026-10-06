@@ -1,4 +1,3 @@
-import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
@@ -62,6 +61,7 @@ const renderWithRoleGuard = (role: SystemRole = 'administrator') => {
           active_sites: [],
           is_active: true,
           created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
         role,
         accessToken: 'fake-token',

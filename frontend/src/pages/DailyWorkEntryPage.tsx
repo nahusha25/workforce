@@ -164,10 +164,6 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
     []
   );
 
-  const totalQuantities = useMemo(() => {
-    return lineItems.reduce((acc, it) => acc + (Number(it.quantity) || 0), 0);
-  }, [lineItems]);
-
   const allLinesValidQuantity = useMemo(() => {
     if (lineItems.length === 0) return false;
     return lineItems.every((it) => Boolean(it.activityId) && Number(it.quantity) > 0);
@@ -734,7 +730,7 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
                         min="0"
                         step="any"
                         className={styles.quantityInput}
-                        value={line.quantity === 0 && line.quantity !== '' ? '0' : line.quantity}
+                        value={line.quantity}
                         onChange={(e) => {
                           const val = e.target.value;
                           updateLineField(index, 'quantity', val === '' ? '' : parseFloat(val));

@@ -1,3 +1,12 @@
+import asyncio
+import sys
+
+# Fix: asyncpg is incompatible with Windows ProactorEventLoop (the default on
+# Python 3.8+ on Windows). Force SelectorEventLoop to prevent
+# ConnectionDoesNotExistError on every DB call.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -28,7 +37,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "0"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' blob: data: https:; connect-src 'self' https:"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' blob: data: https:; connect-src 'self' http: https: ws: wss:"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(self), geolocation=(self), microphone=()"
     return response

@@ -896,3 +896,30 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+.modalErrorBanner {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: 0.625rem 0.875rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.875rem;
+  font-size: var(--font-size-xs, 0.8125rem);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.refreshingBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-primary-600, #4f46e5);
+  background-color: var(--color-primary-50, #eef2ff);
+  border: 1px solid var(--color-primary-200, #c7d2fe);
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  margin-left: 0.75rem;
+}

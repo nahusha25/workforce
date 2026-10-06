@@ -453,7 +453,7 @@ describe('DailyWorkEntryPage (Multi-Activity Line-Item UX)', () => {
     ];
 
     (getDailyWorkEntries as any).mockResolvedValue(existingLines);
-    (updateDailyWorkEntry as any).mockImplementation((id, data) =>
+    (updateDailyWorkEntry as any).mockImplementation((id: string, data: any) =>
       Promise.resolve({ id, status: 'draft', ...data })
     );
     (submitDailyWorkEntry as any).mockResolvedValue({

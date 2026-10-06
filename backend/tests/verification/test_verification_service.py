@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+import asyncio
 import uuid
 
 import pytest
@@ -466,6 +467,57 @@ async def test_idempotency_replay_on_duplicate_key_returns_existing_record_with_
 
 
 @pytest.mark.asyncio
+async def test_concurrent_rapid_idempotency_key_verification():
+    """Requirement 3: Two rapid/concurrent requests with the exact same idempotency_key
+    must not create duplicate verification records in the database.
+    """
+    async with TestingSessionLocal() as session1, TestingSessionLocal() as session2:
+        env = await setup_test_environment(session1)
+        dwe = env["daily_work_entry"]
+        key = f"CONCURRENT-KEY-{uuid.uuid4()}"
+
+        # Run two verify_entity calls concurrently with the same idempotency_key
+        # using separate database sessions (simulating two worker threads/processes)
+        task1 = VerificationService.verify_entity(
+            session=session1,
+            entity_type="daily_work",
+            entity_id=dwe.id,
+            action="approved",
+            idempotency_key=key,
+            supervisor_user_id=env["sup_user"].id,
+            supervisor_emp_id=env["sup_emp"].id,
+        )
+        task2 = VerificationService.verify_entity(
+            session=session2,
+            entity_type="daily_work",
+            entity_id=dwe.id,
+            action="approved",
+            idempotency_key=key,
+            supervisor_user_id=env["sup_user"].id,
+            supervisor_emp_id=env["sup_emp"].id,
+        )
+
+        results = await asyncio.gather(task1, task2, return_exceptions=True)
+
+        # Explicit assertion that neither concurrent task raised an unhandled exception
+        exceptions = [r for r in results if isinstance(r, Exception)]
+        assert not exceptions, f"Concurrent task(s) raised unexpected exception(s): {exceptions}"
+        assert len(results) == 2
+
+        vr1, status1, is_replay1 = results[0]
+        vr2, status2, is_replay2 = results[1]
+
+        # Exactly one is original, one is replay
+        assert (is_replay1, is_replay2) in ((False, True), (True, False))
+        assert vr1.id == vr2.id
+
+        # Verify at DB level that exactly ONE record exists with this idempotency key
+        stmt = select(VerificationRecord).where(VerificationRecord.idempotency_key == key)
+        db_records = (await session1.execute(stmt)).scalars().all()
+        assert len(db_records) == 1
+
+
+@pytest.mark.asyncio
 async def test_state_machine_idempotency_when_already_approved():
     async with TestingSessionLocal() as session:
         env = await setup_test_environment(session)
@@ -501,13 +553,14 @@ async def test_state_machine_idempotency_when_already_approved():
 
 @pytest.mark.asyncio
 async def test_unassigned_supervisor_outside_team_scope_blocked():
-    """Failure Mode A: A supervisor attempts to verify an employee/site outside their assigned scope."""
+    """Failure Mode A (SEC-004-A): A supervisor attempts to verify an employee/site outside their assigned scope.
+    Must return 404 TargetNotFoundError (not 403) so existence and scope are indistinguishable from outside."""
     async with TestingSessionLocal() as session:
         env = await setup_test_environment(session)
         dwe = env["daily_work_entry"]
 
         # other_sup_emp is not assigned to worker_emp or the site
-        with pytest.raises(UnauthorizedSupervisorError) as exc_info:
+        with pytest.raises(TargetNotFoundError) as exc_info:
             await VerificationService.verify_entity(
                 session=session,
                 entity_type="daily_work",
@@ -517,7 +570,8 @@ async def test_unassigned_supervisor_outside_team_scope_blocked():
                 supervisor_user_id=env["other_sup_user"].id,
                 supervisor_emp_id=env["other_sup_emp"].id,
             )
-        assert exc_info.value.status_code == 403
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "Daily work record not found"
 
 
 @pytest.mark.asyncio
@@ -1353,20 +1407,23 @@ async def test_history_admin_reopen_chain_three_events_chronological():
 
 
 @pytest.mark.asyncio
-async def test_history_unassigned_supervisor_gets_403():
-    """An unassigned supervisor still gets UnauthorizedSupervisorError for get_employee_detail."""
+async def test_history_unassigned_supervisor_gets_404_sec_004_a():
+    """SEC-004-A: An unassigned supervisor gets 404 TargetNotFoundError (not 403) for get_employee_detail,
+    returning the same 'Employee record not found' as a nonexistent employee."""
     async with TestingSessionLocal() as session:
         env = await setup_test_environment(session)
         worker_emp = env["worker_emp"]
         other_sup_emp = env["other_sup_emp"]
 
-        with pytest.raises(UnauthorizedSupervisorError):
+        with pytest.raises(TargetNotFoundError) as exc_info:
             await VerificationService.get_employee_detail(
                 session=session,
                 supervisor_emp_id=other_sup_emp.id,
                 employee_id=worker_emp.id,
                 review_date=env["today"],
             )
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "Employee record not found"
 
 
 @pytest.mark.asyncio

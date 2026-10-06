@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple, Union
 import uuid
 
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.auth import User
@@ -344,7 +345,7 @@ class VerificationService:
         res_emp = await session.execute(stmt_emp)
         emp = res_emp.scalars().first()
         if not emp:
-            raise TargetNotFoundError("employee", str(employee_id))
+            raise TargetNotFoundError("employee")
 
         # Authorization check
         is_auth = await VerificationService.is_supervisor_authorized(
@@ -354,7 +355,9 @@ class VerificationService:
             is_admin=is_admin,
         )
         if not is_auth:
-            raise UnauthorizedSupervisorError()
+            # SEC-004-A: Return identical 404 when employee is outside supervisor's scope
+            # to prevent user enumeration via 403 vs 404 timing/status oracle.
+            raise TargetNotFoundError("employee")
 
         # ── 1. Fetch attendance ──────────────────────────────────────────────
         stmt_att = (
@@ -664,7 +667,9 @@ class VerificationService:
             is_admin=is_admin,
         )
         if not is_auth:
-            raise UnauthorizedSupervisorError()
+            # SEC-004-A: Return identical 404 when target entity is outside supervisor's scope
+            # to prevent target enumeration via 403 vs 404 timing/status oracle.
+            raise TargetNotFoundError(norm_entity)
 
         # 3. State-Machine Guard & Replay Check
         current_status = target_obj.status
@@ -758,11 +763,22 @@ class VerificationService:
         )
         session.add(audit)
 
-        await session.commit()
-        await session.refresh(vr)
-        await session.refresh(target_obj)
-
-        return vr, new_status, False
+        try:
+            await session.commit()
+            await session.refresh(vr)
+            await session.refresh(target_obj)
+            return vr, new_status, False
+        except IntegrityError:
+            await session.rollback()
+            # Under concurrent race where two rapid requests pass the initial select,
+            # the DB unique constraint prevents duplicate creation. Retrieve the winner's record.
+            stmt_idemp = select(VerificationRecord).where(VerificationRecord.idempotency_key == idempotency_key)
+            res_idemp = await session.execute(stmt_idemp)
+            existing_vr = res_idemp.scalars().first()
+            if existing_vr:
+                target_status = await VerificationService._get_target_status(session, norm_entity, entity_id)
+                return existing_vr, target_status, True
+            raise
 
     @staticmethod
     async def _fetch_target_entity(

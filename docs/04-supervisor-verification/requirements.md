@@ -37,13 +37,13 @@ approved → Reopen (authorised only) → correction_required (with audit trail)
 ```
 
 ## Acceptance Criteria
-- [ ] Supervisor sees EOD summary of assigned employees' attendance, work, photos, materials
-- [ ] Supervisor can approve individual entries
-- [ ] Supervisor can reject with mandatory remarks
-- [ ] Supervisor can return for correction with mandatory remarks
-- [ ] Approved records become read-only
-- [ ] Changes to approved records require remarks and produce audit trail
-- [ ] Exception flags visible to supervisor (missing checkout, no photo, high-value purchase, etc.)
+- [x] Supervisor sees EOD summary of assigned employees' attendance, work, photos, materials
+- [x] Supervisor can approve individual entries
+- [x] Supervisor can reject with mandatory remarks
+- [x] Supervisor can return for correction with mandatory remarks
+- [x] Approved records become read-only
+- [x] Changes to approved records require remarks and produce audit trail
+- [x] Exception flags visible to supervisor (missing checkout, no photo, high-value purchase, etc.)
 
 ## Dependencies
 - Phase 3 complete (work entries and materials exist with submitted status)

@@ -49,22 +49,23 @@ backend/app/modules/verification/
 ### Service Layer Logic
 
 1. **get_eod_summary**:
-   - Query all assigned employees.
+   - Query all assigned employees (or all if Director/Admin).
    - For a given date, aggregate attendance status, count work entries, count photos, sum material cost.
-   - Compute `exception_flags` for each row.
-   - Return list.
+   - Compute `exception_flags` for each row dynamically.
+   - Return list with `has_pending_verification` flag.
 
 2. **approve / reject / return**:
-   - Validate `entity_type` (attendance or daily_work).
-   - Validate current status == 'submitted' (or 'approved' for authorised reopen).
-   - If reject/return, `remarks` > 10 chars.
+   - Validate `entity_type` ('attendance', 'daily_work', or 'material').
+   - Validate current status == 'submitted' (or 'approved' for authorized reopen by Admin/Director).
+   - If reject/return, validate `remarks` trimmed length >= 10 chars.
+   - Enforce SEC-004-A: Return generic 404 Not Found if target employee/record is unassigned or non-existent.
    - Update target entity status.
    - Insert `verification_records` with `verified_by` = current_user.
-   - Insert `audit_logs`.
+   - Insert immutable `audit_logs` record.
 
 3. **Global Protection (REQ-BR-006)**:
-   - Middleware or shared repository hook: intercept UPDATE/DELETE on attendance_records and daily_work_entries.
-   - If `status == 'approved'`, block with 409 (unless action is authorised reopen).
+   - Modifications to `attendance_records`, `daily_work_entries`, or `material_transactions` where `status == 'approved'` return HTTP 409 Conflict.
+   - Reopening an approved record creates a new `verification_record` with `action='correction_required'` and transitions status to `correction_required` (restricted to Admin/Director).
 
 ---
 
@@ -72,11 +73,11 @@ backend/app/modules/verification/
 
 | API ID | Method | Endpoint | Auth | Purpose |
 |--------|--------|----------|------|---------|
-| VER-001 | GET | /api/v1/verification/summary | Supervisor | EOD summary queue |
-| VER-002 | GET | /api/v1/verification/summary/{emp_id} | Supervisor | Employee detail |
-| VER-003 | POST | /api/v1/verification/{id}/approve | Supervisor | Approve entry |
-| VER-004 | POST | /api/v1/verification/{id}/reject | Supervisor | Reject entry |
-| VER-005 | POST | /api/v1/verification/{id}/return | Supervisor | Return for correction |
+| VER-001 | GET | /api/v1/verification/summary | Supervisor, Admin, Director | EOD summary queue |
+| VER-002 | GET | /api/v1/verification/summary/{emp_id} | Supervisor (assigned), Admin, Director | Employee detail with audit history |
+| VER-003 | POST | /api/v1/verification/{id}/approve | Supervisor (assigned), Admin, Director | Approve attendance, work, or material |
+| VER-004 | POST | /api/v1/verification/{id}/reject | Supervisor (assigned), Admin, Director | Reject attendance, work, or material |
+| VER-005 | POST | /api/v1/verification/{id}/return | Supervisor (return submitted) / Admin, Director (reopen approved) | Return for correction or reopen |
 
 Full contracts in [`backend-api-plan.md`](./backend-api-plan.md).
 

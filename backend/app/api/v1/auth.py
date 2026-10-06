@@ -26,8 +26,8 @@ async def verify_otp(payload: OtpVerify, response: Response, db: AsyncSession = 
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=True,
-        samesite="strict",
+        secure=False,  # Must be False for http://localhost in dev
+        samesite="lax",
         max_age=7 * 24 * 60 * 60
     )
     
@@ -46,8 +46,8 @@ async def refresh_token(request: Request, response: Response, db: AsyncSession =
         key="refresh_token",
         value=new_refresh_token,
         httponly=True,
-        secure=True,
-        samesite="strict",
+        secure=False,  # Must be False for http://localhost in dev
+        samesite="lax",
         max_age=7 * 24 * 60 * 60
     )
     

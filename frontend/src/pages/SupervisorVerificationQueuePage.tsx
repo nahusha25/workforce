@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getVerificationSummary, type VerificationSummaryItem, type VerificationSummaryResponse } from '../api/verification';
 import { getSitesApi, type SiteResponseData } from '../api/masterData';
-import { ExceptionBadge, type ExceptionFlagType } from '../components/ui/ExceptionBadge';
+import { ExceptionBadge } from '../components/ui/ExceptionBadge';
 import { StatusBadge, mapAttendanceStatusToBadge } from '../components/ui/StatusBadge';
 import { formatDecimal } from '../components/MaterialTransactionEntry';
 import { getLocalISODate, isValidISODate } from '../utils/date';

@@ -7,10 +7,10 @@ class VerificationError(HTTPException):
 
 
 class TargetNotFoundError(VerificationError):
-    def __init__(self, entity_type: str, entity_id: str):
+    def __init__(self, entity_type: str = "record", entity_id: str = None):
         super().__init__(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"{entity_type.replace('_', ' ').capitalize()} with ID '{entity_id}' not found",
+            detail=f"{entity_type.replace('_', ' ').capitalize()} record not found",
         )
 
 

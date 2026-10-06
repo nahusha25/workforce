@@ -1,4 +1,3 @@
-import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
@@ -28,6 +27,7 @@ vi.mock('../api/verification', () => ({
   rejectEntity: vi.fn(),
   returnEntity: vi.fn(),
   generateIdempotencyKey: vi.fn(() => `test-idemp-${++idempCounter}`),
+  STATE_CONFLICT_MARKER: 'Target must be submitted.',
 }));
 
 const mockDetail: EmployeeDayDetailResponse = {
@@ -151,6 +151,7 @@ const renderWithRouter = (
           active_sites: [],
           is_active: true,
           created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
         role,
         accessToken: 'fake-token',
@@ -1177,6 +1178,426 @@ describe('EmployeeDayVerificationPage', () => {
     // Opening second action must immediately clear the success notice
     fireEvent.click(screen.getByTestId('approve-work-entry-dwe-2'));
     expect(screen.queryByTestId('success-notice')).toBeNull();
+  });
+
+  // 34. Approve modal shows errors inside it (role="alert") when approve fails with 422
+  it('displays validation error inside the approve modal with role="alert" and preserves optional remarks', async () => {
+    const err422: any = new Error('Validation error');
+    err422.response = {
+      status: 422,
+      data: { detail: 'Approval limit exceeded or invalid remarks provided' },
+    };
+    vi.mocked(approveEntity).mockRejectedValueOnce(err422);
+
+    vi.mocked(getEmployeeDayDetail).mockResolvedValueOnce({
+      ...mockDetail,
+      work_entries: [
+        {
+          ...mockDetail.work_entries[0],
+          id: 'dwe-1',
+          status: 'submitted',
+        },
+      ],
+    });
+
+    renderWithRouter('supervisor');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approve-work-entry-dwe-1')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId('approve-work-entry-dwe-1'));
+    expect(screen.getByTestId('approve-confirm-modal')).toBeTruthy();
+
+    const remarksInput = screen.getByLabelText(/Remarks \(Optional\)/i) as HTMLTextAreaElement;
+    fireEvent.change(remarksInput, { target: { value: 'Approved with conditions' } });
+
+    fireEvent.click(screen.getByTestId('confirm-approve-btn'));
+
+    await waitFor(() => {
+      expect(approveEntity).toHaveBeenCalledTimes(1);
+    });
+
+    // Modal remains open
+    expect(screen.getByTestId('approve-confirm-modal')).toBeTruthy();
+    // Error is rendered with role="alert" inside modal
+    const alertBox = screen.getByTestId('approve-modal-error');
+    expect(alertBox).toBeTruthy();
+    expect(alertBox.getAttribute('role')).toBe('alert');
+    expect(alertBox.textContent).toContain('Approval limit exceeded or invalid remarks provided');
+    // Remarks preserved
+    expect(remarksInput.value).toBe('Approved with conditions');
+  });
+
+  // 35. Cancelling or closing any action modal clears actionError and lastFailedAction
+  it('clears actionError and lastFailedAction when an action modal is cancelled or closed', async () => {
+    const err422: any = new Error('Validation error');
+    err422.response = {
+      status: 422,
+      data: { detail: 'Remarks validation failed' },
+    };
+    vi.mocked(approveEntity).mockRejectedValueOnce(err422);
+
+    vi.mocked(getEmployeeDayDetail).mockResolvedValueOnce({
+      ...mockDetail,
+      work_entries: [
+        {
+          ...mockDetail.work_entries[0],
+          id: 'dwe-1',
+          status: 'submitted',
+        },
+      ],
+    });
+
+    renderWithRouter('supervisor');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approve-work-entry-dwe-1')).toBeTruthy();
+    });
+
+    // 1. Open approve modal, fail with 422 to produce modal error
+    fireEvent.click(screen.getByTestId('approve-work-entry-dwe-1'));
+    fireEvent.click(screen.getByTestId('confirm-approve-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approve-modal-error')).toBeTruthy();
+    });
+
+    // 2. Cancel the modal
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    expect(screen.queryByTestId('approve-confirm-modal')).toBeNull();
+
+    // 3. Stale error must NOT be present anywhere in the DOM
+    expect(screen.queryByTestId('approve-modal-error')).toBeNull();
+    expect(screen.queryByTestId('page-action-error')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // 4. Re-opening the modal must start fresh without any error
+    fireEvent.click(screen.getByTestId('approve-work-entry-dwe-1'));
+    expect(screen.getByTestId('approve-confirm-modal')).toBeTruthy();
+    expect(screen.queryByTestId('approve-modal-error')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  // 36. 403 error displays "You are not allowed to do this" without a Retry button
+  it('displays "You are not allowed to do this" with no Retry button when action returns 403', async () => {
+    const err403: any = new Error('Forbidden');
+    err403.response = {
+      status: 403,
+      data: { detail: 'Only administrators or directors can reopen an approved record' },
+    };
+    vi.mocked(returnEntity).mockRejectedValueOnce(err403);
+
+    vi.mocked(getEmployeeDayDetail).mockResolvedValueOnce({
+      ...mockDetail,
+      work_entries: [
+        {
+          ...mockDetail.work_entries[0],
+          id: 'dwe-1',
+          status: 'approved',
+        },
+      ],
+    });
+
+    renderWithRouter('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reopen-work-entry-dwe-1')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId('reopen-work-entry-dwe-1'));
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Valid administrative reopen reason here' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /confirm reopen/i }));
+
+    await waitFor(() => {
+      expect(returnEntity).toHaveBeenCalledTimes(1);
+    });
+
+    // Modal closes
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // Page displays clear non-retryable message
+    const errorNotice = screen.getByTestId('page-action-error');
+    expect(errorNotice).toBeTruthy();
+    expect(errorNotice.textContent).toContain('You are not allowed to do this');
+
+    // Must NOT offer a Retry button
+    expect(screen.queryByTestId('action-retry-btn')).toBeNull();
+  });
+
+  // 37. 404 error (target gone) reloads detail and displays "This record changed; refreshed"
+  it('handles 404 target not found by closing modal, showing "This record changed; refreshed", and reloading detail', async () => {
+    const err404: any = new Error('Not found');
+    err404.response = {
+      status: 404,
+      data: { detail: "Daily work entry with ID 'dwe-1' not found" },
+    };
+    vi.mocked(approveEntity).mockRejectedValueOnce(err404);
+
+    vi.mocked(getEmployeeDayDetail).mockResolvedValueOnce({
+      ...mockDetail,
+      work_entries: [
+        {
+          ...mockDetail.work_entries[0],
+          id: 'dwe-1',
+          status: 'submitted',
+        },
+      ],
+    });
+
+    renderWithRouter('supervisor');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approve-work-entry-dwe-1')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId('approve-work-entry-dwe-1'));
+    fireEvent.click(screen.getByTestId('confirm-approve-btn'));
+
+    await waitFor(() => {
+      expect(approveEntity).toHaveBeenCalledTimes(1);
+    });
+
+    // Modal closes
+    expect(screen.queryByTestId('approve-confirm-modal')).toBeNull();
+
+    // Conflict notice rendered
+    const conflictNotice = screen.getByTestId('conflict-notice');
+    expect(conflictNotice).toBeTruthy();
+    expect(conflictNotice.textContent).toContain('This record changed; refreshed');
+
+    // Reload triggered
+    await waitFor(() => {
+      expect(getEmployeeDayDetail).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // 38. Network error (no response/status) offers a Retry button
+  it('offers a Retry button when action encounters a network error', async () => {
+    const netErr: any = new Error('Network Connection Lost');
+    // network error has no response property
+    vi.mocked(approveEntity).mockRejectedValueOnce(netErr);
+    vi.mocked(approveEntity).mockResolvedValueOnce({
+      id: 'vr-net-1',
+      action: 'approved',
+      is_replay: false,
+    } as any);
+
+    vi.mocked(getEmployeeDayDetail).mockResolvedValueOnce({
+      ...mockDetail,
+      work_entries: [
+        {
+          ...mockDetail.work_entries[0],
+          id: 'dwe-1',
+          status: 'submitted',
+        },
+      ],
+    });
+
+    renderWithRouter('supervisor');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approve-work-entry-dwe-1')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId('approve-work-entry-dwe-1'));
+    fireEvent.click(screen.getByTestId('confirm-approve-btn'));
+
+    await waitFor(() => {
+      expect(approveEntity).toHaveBeenCalledTimes(1);
+    });
+
+    // Modal closes and page-level error with Retry is displayed
+    expect(screen.queryByTestId('approve-confirm-modal')).toBeNull();
+    expect(screen.getByTestId('page-action-error')).toBeTruthy();
+    expect(screen.getByTestId('action-retry-btn')).toBeTruthy();
+
+    // Click Retry
+    fireEvent.click(screen.getByTestId('action-retry-btn'));
+
+    await waitFor(() => {
+      expect(approveEntity).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('success-notice')).toBeTruthy();
+    });
+  });
+
+  // 39. Conflict detection: Admin reopen of already-reopened item
+  it('handles state conflict when admin reopens an already-reopened item using exact backend error string', async () => {
+    const conflictErr: any = new Error('Bad request');
+    conflictErr.response = {
+      status: 400,
+      data: {
+        detail: "Cannot correction_required record with status 'correction_required'. Target must be submitted.",
+      },
+    };
+    vi.mocked(returnEntity).mockRejectedValueOnce(conflictErr);
+
+    vi.mocked(getEmployeeDayDetail).mockResolvedValueOnce({
+      ...mockDetail,
+      work_entries: [
+        {
+          ...mockDetail.work_entries[0],
+          id: 'dwe-1',
+          status: 'approved',
+        },
+      ],
+    });
+
+    renderWithRouter('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reopen-work-entry-dwe-1')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId('reopen-work-entry-dwe-1'));
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Valid administrative reopen reason here' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /confirm reopen/i }));
+
+    await waitFor(() => {
+      expect(returnEntity).toHaveBeenCalledTimes(1);
+    });
+
+    // Modal closes
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // Record changed notice displayed
+    expect(screen.getByTestId('conflict-notice')).toBeTruthy();
+    expect(screen.getByTestId('conflict-notice').textContent).toContain('This record changed; refreshed');
+    // Day detail reloaded
+    await waitFor(() => {
+      expect(getEmployeeDayDetail).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // 40. Conflict detection: Approve of already-rejected item
+  it('handles state conflict when approving an already-rejected item using exact backend error string', async () => {
+    const conflictErr: any = new Error('Bad request');
+    conflictErr.response = {
+      status: 400,
+      data: {
+        detail: "Cannot approved record with status 'rejected'. Target must be submitted.",
+      },
+    };
+    vi.mocked(approveEntity).mockRejectedValueOnce(conflictErr);
+
+    vi.mocked(getEmployeeDayDetail).mockResolvedValueOnce({
+      ...mockDetail,
+      work_entries: [
+        {
+          ...mockDetail.work_entries[0],
+          id: 'dwe-1',
+          status: 'submitted',
+        },
+      ],
+    });
+
+    renderWithRouter('supervisor');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approve-work-entry-dwe-1')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId('approve-work-entry-dwe-1'));
+    fireEvent.click(screen.getByTestId('confirm-approve-btn'));
+
+    await waitFor(() => {
+      expect(approveEntity).toHaveBeenCalledTimes(1);
+    });
+
+    // Modal closes
+    expect(screen.queryByTestId('approve-confirm-modal')).toBeNull();
+    // Record changed notice displayed
+    expect(screen.getByTestId('conflict-notice')).toBeTruthy();
+    expect(screen.getByTestId('conflict-notice').textContent).toContain('This record changed; refreshed');
+    // Day detail reloaded
+    await waitFor(() => {
+      expect(getEmployeeDayDetail).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // 41. Refresh indicator and disabled action buttons during in-flight refresh
+  it('shows "Refreshing…" indicator and keeps action buttons disabled while post-action refresh is in flight', async () => {
+    let resolveRefresh: any;
+    const refreshPromise = new Promise((resolve) => {
+      resolveRefresh = resolve;
+    });
+
+    vi.mocked(approveEntity).mockResolvedValueOnce({
+      id: 'vr-ref-1',
+      action: 'approved',
+      is_replay: false,
+    } as any);
+
+    const initialDetail = {
+      ...mockDetail,
+      attendance: {
+        ...mockDetail.attendance!,
+        status: 'submitted',
+      },
+      work_entries: [
+        {
+          ...mockDetail.work_entries[0],
+          id: 'dwe-1',
+          status: 'submitted',
+        },
+      ],
+    };
+
+    // First call: initial load. Second call: in-flight refresh.
+    vi.mocked(getEmployeeDayDetail)
+      .mockResolvedValueOnce(initialDetail)
+      .mockReturnValueOnce(refreshPromise as any);
+
+    renderWithRouter('supervisor');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approve-work-entry-dwe-1')).toBeTruthy();
+      expect(screen.getByTestId('approve-attendance-btn')).toBeTruthy();
+    });
+
+    // Approve the work entry
+    fireEvent.click(screen.getByTestId('approve-work-entry-dwe-1'));
+    fireEvent.click(screen.getByTestId('confirm-approve-btn'));
+
+    await waitFor(() => {
+      expect(approveEntity).toHaveBeenCalledTimes(1);
+    });
+
+    // While refresh is in flight:
+    // 1. "Refreshing…" indicator is rendered
+    await waitFor(() => {
+      expect(screen.getByTestId('refreshing-indicator')).toBeTruthy();
+    });
+    expect(screen.getByTestId('refreshing-indicator').textContent).toContain('Refreshing…');
+
+    // 2. Action buttons are disabled to prevent clicks against stale data
+    expect(screen.getByTestId('approve-work-entry-dwe-1')).toBeDisabled();
+    expect(screen.getByTestId('reject-work-entry-dwe-1')).toBeDisabled();
+    expect(screen.getByTestId('return-work-entry-dwe-1')).toBeDisabled();
+    expect(screen.getByTestId('approve-attendance-btn')).toBeDisabled();
+    expect(screen.getByTestId('reject-attendance-btn')).toBeDisabled();
+    expect(screen.getByTestId('return-attendance-btn')).toBeDisabled();
+
+    // Resolve the refresh
+    resolveRefresh({
+      ...initialDetail,
+      work_entries: [
+        {
+          ...initialDetail.work_entries[0],
+          status: 'approved',
+        },
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('refreshing-indicator')).toBeNull();
+    });
+
+    // After refresh completes, remaining action buttons are re-enabled
+    expect(screen.getByTestId('approve-attendance-btn')).not.toBeDisabled();
   });
 });
 

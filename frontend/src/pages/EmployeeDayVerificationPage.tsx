@@ -7,8 +7,8 @@ import {
   rejectEntity,
   returnEntity,
   generateIdempotencyKey,
+  STATE_CONFLICT_MARKER,
   type EmployeeDayDetailResponse,
-  type EmployeeDayPhotoDetail,
   type EntityType,
 } from '../api/verification';
 import { VerificationRemarksModal } from '../components/verification/VerificationRemarksModal';
@@ -22,7 +22,6 @@ import {
   Calendar,
   Building2,
   Clock,
-  MapPin,
   CheckCircle2,
   AlertTriangle,
   ShieldAlert,
@@ -114,6 +113,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
 
   const [detail, setDetail] = useState<EmployeeDayDetailResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<{ status?: number; message: string } | null>(null);
   const [reloadKey, setReloadKey] = useState<number>(0);
 
@@ -138,6 +138,13 @@ export const EmployeeDayVerificationPage: React.FC = () => {
     setReloadKey((k) => k + 1);
   };
 
+  const closeActiveAction = () => {
+    if (isSubmitting) return;
+    setActiveAction(null);
+    setActionError(null);
+    setLastFailedAction(null);
+  };
+
   const openLightbox = (url: string) => {
     setLightboxError(false);
     setActiveLightboxImage(url);
@@ -154,6 +161,8 @@ export const EmployeeDayVerificationPage: React.FC = () => {
     // When refreshing after an action, keep content DOM mounted to preserve scroll position.
     if (!detail) {
       setLoading(true);
+    } else {
+      setIsRefreshing(true);
     }
     setError(null);
 
@@ -164,6 +173,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
           if (!ignore) {
             setDetail(data);
             setLoading(false);
+            setIsRefreshing(false);
             if (scrollYBefore > 0 && typeof window !== 'undefined') {
               window.scrollTo(0, scrollYBefore);
             }
@@ -178,10 +188,12 @@ export const EmployeeDayVerificationPage: React.FC = () => {
               message: typeof msg === 'string' ? msg : JSON.stringify(msg),
             });
             setLoading(false);
+            setIsRefreshing(false);
           }
         });
     } else {
       setLoading(false);
+      setIsRefreshing(false);
     }
 
     return () => {
@@ -219,6 +231,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
     setSuccessNotice(null);
     setConflictNotice(null);
     setActionError(null);
+    setLastFailedAction(null);
     setActiveAction({
       targetId,
       entityType,
@@ -280,19 +293,22 @@ export const EmployeeDayVerificationPage: React.FC = () => {
 
       const isConflict =
         status === 409 ||
+        status === 404 ||
         (status === 400 &&
-          (detailStr.includes('Target must be submitted') ||
-            detailStr.includes('Cannot approve record with status') ||
-            detailStr.includes('Cannot reject record with status') ||
-            detailStr.includes('Cannot correction_required record with status')));
+          typeof detailStr === 'string' &&
+          detailStr.includes(STATE_CONFLICT_MARKER));
 
       if (isConflict) {
-        setActiveAction(null);
-        setActionError(null);
-        setLastFailedAction(null);
+        closeActiveAction();
         setConflictNotice('This record changed; refreshed');
         setSuccessNotice(null);
         setReloadKey((k) => k + 1);
+      } else if (status === 403) {
+        // 403: permission denied / unauthorized supervisor / unauthorized reopen
+        // Show clear message with NO Retry option
+        closeActiveAction();
+        setActionError('You are not allowed to do this');
+        setLastFailedAction(null);
       } else if (status === 422) {
         // 422 validation error: keep modal open, preserve remarks, show error in modal
         const errorMsg =
@@ -301,8 +317,8 @@ export const EmployeeDayVerificationPage: React.FC = () => {
             : err.message || 'Validation error. Please check remarks and try again.';
         setActionError(errorMsg);
         // keep activeAction open so remarks are preserved in modal
-      } else {
-        // Network or server error: close modal, display page-level retryable error
+      } else if (!status || status >= 500) {
+        // Network or 5xx server error: close modal, display page-level retryable error
         const errorMsg =
           typeof detailMsg === 'string'
             ? detailMsg
@@ -310,6 +326,15 @@ export const EmployeeDayVerificationPage: React.FC = () => {
         setActiveAction(null);
         setActionError(errorMsg);
         setLastFailedAction(actionState);
+      } else {
+        // Other 4xx client errors: close modal, display error without retry
+        const errorMsg =
+          typeof detailMsg === 'string'
+            ? detailMsg
+            : err.message || 'Action failed. Please try again.';
+        setActiveAction(null);
+        setActionError(errorMsg);
+        setLastFailedAction(null);
       }
     } finally {
       setIsSubmitting(false);
@@ -453,6 +478,11 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                 <div className={styles.employeeName}>
                   {detail.employee_name}
                   <span className={styles.employeeCode}>{detail.employee_code}</span>
+                  {isRefreshing && (
+                    <span className={styles.refreshingBadge} data-testid="refreshing-indicator">
+                      <Loader2 size={12} className="animate-spin" /> Refreshing…
+                    </span>
+                  )}
                 </div>
                 <div className={styles.headerMeta}>
                   <span className={styles.metaItem}>
@@ -510,7 +540,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                         type="button"
                         className={styles.btnApprove}
                         data-testid="approve-attendance-btn"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || isRefreshing}
                         onClick={() =>
                           openAction(
                             detail.attendance!.id,
@@ -526,7 +556,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                         type="button"
                         className={styles.btnReject}
                         data-testid="reject-attendance-btn"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || isRefreshing}
                         onClick={() =>
                           openAction(
                             detail.attendance!.id,
@@ -542,7 +572,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                         type="button"
                         className={styles.btnReturn}
                         data-testid="return-attendance-btn"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || isRefreshing}
                         onClick={() =>
                           openAction(
                             detail.attendance!.id,
@@ -564,7 +594,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                         type="button"
                         className={styles.btnReopen}
                         data-testid="reopen-attendance-btn"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || isRefreshing}
                         onClick={() =>
                           openAction(
                             detail.attendance!.id,
@@ -711,7 +741,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                               type="button"
                               className={styles.btnApprove}
                               data-testid={`approve-work-entry-${entry.id}`}
-                              disabled={isSubmitting}
+                              disabled={isSubmitting || isRefreshing}
                               onClick={() =>
                                 openAction(
                                   entry.id,
@@ -727,7 +757,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                               type="button"
                               className={styles.btnReject}
                               data-testid={`reject-work-entry-${entry.id}`}
-                              disabled={isSubmitting}
+                              disabled={isSubmitting || isRefreshing}
                               onClick={() =>
                                 openAction(
                                   entry.id,
@@ -743,7 +773,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                               type="button"
                               className={styles.btnReturn}
                               data-testid={`return-work-entry-${entry.id}`}
-                              disabled={isSubmitting}
+                              disabled={isSubmitting || isRefreshing}
                               onClick={() =>
                                 openAction(
                                   entry.id,
@@ -764,7 +794,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                               type="button"
                               className={styles.btnReopen}
                               data-testid={`reopen-work-entry-${entry.id}`}
-                              disabled={isSubmitting}
+                              disabled={isSubmitting || isRefreshing}
                               onClick={() =>
                                 openAction(
                                   entry.id,
@@ -888,7 +918,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                                           type="button"
                                           className={styles.btnApprove}
                                           data-testid={`approve-material-${mat.id}`}
-                                          disabled={isSubmitting}
+                                          disabled={isSubmitting || isRefreshing}
                                           onClick={() =>
                                             openAction(
                                               mat.id,
@@ -905,7 +935,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                                           type="button"
                                           className={styles.btnReject}
                                           data-testid={`reject-material-${mat.id}`}
-                                          disabled={isSubmitting}
+                                          disabled={isSubmitting || isRefreshing}
                                           onClick={() =>
                                             openAction(
                                               mat.id,
@@ -921,7 +951,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                                           type="button"
                                           className={styles.btnReturn}
                                           data-testid={`return-material-${mat.id}`}
-                                          disabled={isSubmitting}
+                                          disabled={isSubmitting || isRefreshing}
                                           onClick={() =>
                                             openAction(
                                               mat.id,
@@ -942,7 +972,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                                           type="button"
                                           className={styles.btnReopen}
                                           data-testid={`reopen-material-${mat.id}`}
-                                          disabled={isSubmitting}
+                                          disabled={isSubmitting || isRefreshing}
                                           onClick={() =>
                                             openAction(
                                               mat.id,
@@ -1058,7 +1088,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                 type="button"
                 className={styles.modalCloseBtn}
                 onClick={() => {
-                  if (!isSubmitting) setActiveAction(null);
+                  if (!isSubmitting) closeActiveAction();
                 }}
                 disabled={isSubmitting}
                 aria-label="Close modal"
@@ -1110,18 +1140,9 @@ export const EmployeeDayVerificationPage: React.FC = () => {
               </div>
 
               {actionError && (
-                <div className={styles.actionErrorBanner} data-testid="modal-action-error" role="alert">
+                <div className={styles.modalErrorBanner} data-testid="approve-modal-error" role="alert">
                   <AlertTriangle size={16} />
-                  <span style={{ flex: 1 }}>{actionError}</span>
-                  <button
-                    type="button"
-                    className={styles.inlineRetryBtn}
-                    data-testid="modal-retry-btn"
-                    onClick={() => executeAction(activeAction)}
-                    disabled={isSubmitting}
-                  >
-                    Retry
-                  </button>
+                  <span>{actionError}</span>
                 </div>
               )}
             </div>
@@ -1130,7 +1151,9 @@ export const EmployeeDayVerificationPage: React.FC = () => {
               <button
                 type="button"
                 className={styles.btnSecondary}
-                onClick={() => setActiveAction(null)}
+                onClick={() => {
+                  if (!isSubmitting) closeActiveAction();
+                }}
                 disabled={isSubmitting}
               >
                 Cancel
@@ -1166,7 +1189,7 @@ export const EmployeeDayVerificationPage: React.FC = () => {
           }
           onConfirm={(trimmedRemarks) => executeAction(activeAction, trimmedRemarks)}
           onCancel={() => {
-            if (!isSubmitting) setActiveAction(null);
+            if (!isSubmitting) closeActiveAction();
           }}
           isSubmitting={isSubmitting}
           error={actionError}

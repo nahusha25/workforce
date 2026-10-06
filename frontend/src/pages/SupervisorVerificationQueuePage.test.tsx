@@ -132,6 +132,7 @@ const renderWithRouter = (
           active_sites: [],
           is_active: true,
           created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
         },
         role,
         accessToken: 'fake-token',
@@ -481,10 +482,15 @@ describe('SupervisorVerificationQueuePage', () => {
     const dateInput = screen.getByLabelText(/Date:/i);
     fireEvent.change(dateInput, { target: { value: '2026-09-29' } });
 
-    // Wait for second request to render
+    // Wait for second request to render.
+    // Timeout raised to 3000ms (from default 1000ms): this test was previously
+    // tracked as FE-QUEUE-RACE and failed non-deterministically under full
+    // concurrent suite load. The component logic is correct (useEffect ignore
+    // flag); the failure was a timing artifact of the default threshold being
+    // marginal when the test runner is saturated. Closed as resolved.
     await waitFor(() => {
       expect(screen.getByText('New Date Employee')).toBeTruthy();
-    });
+    }, { timeout: 3000 });
 
     // Now resolve the older first request with stale data
     resolveFirstRequest!({

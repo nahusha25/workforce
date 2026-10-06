@@ -101,6 +101,19 @@ export const Sidebar: React.FC = () => {
             >
               Materials
             </NavLink>
+            <div className={styles.sectionTitle}>Analytics & Reports</div>
+            <NavLink
+              to="/dashboard"
+              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+            >
+              Dashboard
+            </NavLink>
+            <NavLink
+              to="/reports/attendance"
+              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+            >
+              Reports
+            </NavLink>
           </>
         )}
       </nav>

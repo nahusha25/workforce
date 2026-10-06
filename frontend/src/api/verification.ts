@@ -3,6 +3,12 @@ import { apiClient } from './client';
 export type EntityType = 'attendance' | 'daily_work' | 'material' | 'material_transaction';
 export type VerificationAction = 'approved' | 'rejected' | 'correction_required';
 
+/**
+ * Substring marker raised by backend InvalidVerificationStateError when target record
+ * is not in a valid state for the requested verification action (e.g. already approved/rejected).
+ */
+export const STATE_CONFLICT_MARKER = 'Target must be submitted.';
+
 export interface VerificationHistoryEvent {
   id: string;
   action: string;

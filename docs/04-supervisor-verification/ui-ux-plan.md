@@ -31,30 +31,49 @@
 ## Screen: Detail Review (Mobile)
 ```
 ┌──────────────────────────┐
-│  ← Rajesh K | 11 Aug    │
+│  ← Rajesh K | 29 Sep    │
 ├──────────────────────────┤
 │  ATTENDANCE              │
 │  In: 8:15 | Out: 17:30  │
-│  GPS: ✅ Within range    │
+│  GPS: ⚠ Out of Location  │
+│  [Approve] [Reject]      │
+│  [Return for Correction] │
+│  ── Attendance History ──│
 ├──────────────────────────┤
-│  WORK QUANTITIES         │
-│  Cable Runs: 5           │
-│  Cable Length: 120.5m    │
-│  Devices: 0              │
-├──────────────────────────┤
-│  PHOTOS (2)              │
-│  [thumb] [thumb]         │
-├──────────────────────────┤
-│  MATERIALS               │
-│  Cat6 Cable: 100m ₹5000 │
-│  ⚠ High-value purchase   │
-├──────────────────────────┤
-│ [Approve] [Reject] [Return] │
+│  WORK ENTRY: Cable Laying│
+│  Quantity: 120.5m        │
+│  Photos: [thumb]         │
+│  [Approve] [Reject]      │
+│  [Return] [Reopen (Admin)│
+│  ── Materials ────────── │
+│  ┌──────────────────────┐│
+│  │ Heat Shrink (₹150)   ││
+│  │ [Approve] [Reject]   ││
+│  └──────────────────────┘│
+│  ┌──────────────────────┐│
+│  │ Cleaver Blade (₹4500)││
+│  │ ⚠ High-Value Purchase││
+│  │ [Approve] → [Warning]││
+│  └──────────────────────┘│
+│  ── Work Entry History ──│
+│  ● Approved by Sup       │
+│  ● Returned by Admin     │
 └──────────────────────────┘
 ```
 
+## Modals
+1. **VerificationRemarksModal**:
+   - Triggered on Reject, Return for Correction, or Reopen.
+   - Requires >= 10 non-whitespace characters in textarea before submit button is enabled.
+   - Shows live character counter when under the threshold.
+2. **High-Value Approval Warning Modal**:
+   - Triggered when approving any material transaction with `is_high_value = true`.
+   - Displays clear warning banner stating that the purchase amount exceeds the item's purchase approval limit.
+   - Requires explicit confirmation click (`Confirm Approval`) to submit.
+
 ## Accessibility
-- Exception badges: text + icon + colour
-- Action buttons: `aria-label` with employee context
-- Photo gallery: alt text, keyboard navigable
-- Remarks modal: focus trap, label, required indication
+- Exception badges: semantic text + icon + high-contrast color scheme.
+- Action buttons: descriptive `data-testid` and context-specific aria labels.
+- Photo gallery: alt text, lightbox dialog with role `dialog`, aria-modal, and Escape key dismissal.
+- Remarks modal: focus trap, title with `id="remarks-modal-title"`, submit button disabled state reflected in aria.
+- Audit history timeline: semantic `<ol aria-label="Verification audit history">` with `<time>` elements and `<blockquote>` remarks.
