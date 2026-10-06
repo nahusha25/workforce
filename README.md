@@ -135,7 +135,7 @@ Authentication uses mobile number + OTP:
 |---|---|---|
 | **Administrator** | `+919999999999` | Full system access, master data, user onboarding, override re-open |
 | **Director** | `+919999999999` | Financial dashboard, analytics, 6 reports, invoice generation, exports |
-| **Supervisor** | `+917760443750` | EOD review queue, line-item approval/rejections, attendance overrides |
+| **Supervisor** | `+919876543210` | EOD review queue, line-item approval/rejections, attendance overrides |
 | **Field Worker** | `+917760443750` | Mobile attendance check-in/out, work quantity entry, photo uploads |
 
 ---
