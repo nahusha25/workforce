@@ -130,13 +130,13 @@ Authentication uses mobile number + OTP:
 3. In local development, the OTP is saved to `backend/otp.txt` and printed in the backend console output.
 4. Enter the 6-digit code to log in.
 
-### Default Pre-Seeded Accounts:
+### Default Accounts:
 | Role | Mobile Number | Purpose |
 |---|---|---|
-| **Administrator** | `+919999999999` | Full system access, master data, user onboarding, override re-open |
-| **Director** | `+919999999999` | Financial dashboard, analytics, 6 reports, invoice generation, exports |
+| **Administrator** | `+917760443750` | Full system access, master data, employee onboarding, approval overrides |
+| **Director** | `+917760443750` | Executive KPI dashboard, 6 analytical reports, invoice generation & exports |
 | **Supervisor** | `+919876543210` | EOD review queue, line-item approval/rejections, attendance overrides |
-| **Field Worker** | `+917760443750` | Mobile attendance check-in/out, work quantity entry, photo uploads |
+| **Field Worker** | *(None)* | Add new workers via the Administrator panel as needed |
 
 ---
 
