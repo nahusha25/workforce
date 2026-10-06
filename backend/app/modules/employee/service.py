@@ -138,6 +138,22 @@ class EmployeeService:
     async def get_my_profile(self, current_user: User) -> EmployeeResponse:
         employee = await self.repo.get_employee_by_user_id(current_user.id)
         if not employee:
+            if current_user.role in ("administrator", "director"):
+                return EmployeeResponse(
+                    id=current_user.id,
+                    user_id=current_user.id,
+                    employee_code=f"ADM-{str(current_user.id)[:6].upper()}",
+                    mobile_id=current_user.mobile_id,
+                    name=f"System {current_user.role.title()}",
+                    system_role=current_user.role,
+                    supervisor_id=None,
+                    is_active=current_user.is_active,
+                    created_at=current_user.created_at,
+                    updated_at=current_user.updated_at,
+                    trade_roles=[],
+                    current_rate=None,
+                    active_sites=[],
+                )
             raise NotFoundError(f"No employee profile linked to user {current_user.id}")
         return await self._format_employee_response(employee)
 

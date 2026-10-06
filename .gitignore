@@ -34,6 +34,7 @@ htmlcov/
 *.swo
 
 # Project specific
+otp.txt
 backend/otp.txt
 frontend/playwright-report/
 frontend/test-results/
