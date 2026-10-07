@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   createSiteApi,
+  deleteSiteApi,
   getProjectsApi,
   getSitesApi,
   type ProjectResponseData,
@@ -8,18 +9,28 @@ import {
 } from '../api/masterData';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { ConfirmDeleteModal } from '../components/ui/ConfirmDeleteModal';
 import { ErrorMessage } from '../components/ui/ErrorMessage';
 import { Input } from '../components/ui/Input';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { Select } from '../components/ui/Select';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { useAuth } from '../context/AuthContext';
 
 export const SitesPage: React.FC = () => {
+  const { role } = useAuth();
+  const isAdmin = role === 'administrator';
+
   const [sites, setSites] = useState<SiteResponseData[]>([]);
   const [projects, setProjects] = useState<ProjectResponseData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Deletion state
+  const [deleteTarget, setDeleteTarget] = useState<SiteResponseData | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   // Form state
   const [showForm, setShowForm] = useState<boolean>(false);
@@ -97,6 +108,23 @@ export const SitesPage: React.FC = () => {
     }
   };
 
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    setSuccessMsg(null);
+    try {
+      await deleteSiteApi(deleteTarget.id);
+      setSuccessMsg(`Site "${deleteTarget.name}" deleted successfully.`);
+      setDeleteTarget(null);
+      await fetchData();
+    } catch (err: any) {
+      setDeleteError(err.response?.data?.detail || err.message || 'Failed to delete site.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const getProjectName = (pid: string): string => {
     const p = projects.find((item) => item.id === pid);
     return p ? p.name : pid;
@@ -111,16 +139,20 @@ export const SitesPage: React.FC = () => {
             Manage construction sites and geofence radii under projects
           </p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ Add Site'}
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancel' : '+ Add Site'}
+          </Button>
+        )}
       </div>
 
       {successMsg && (
-        <div style={{ padding: '12px 16px', backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-800)', borderRadius: 'var(--radius-md)', fontWeight: 500 }}>
+        <div style={{ padding: '12px 16px', backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-800)', borderRadius: 'var(--radius-md)', fontWeight: 500 }} data-testid="success-banner">
           {successMsg}
         </div>
       )}
+
+      {deleteError && <ErrorMessage title="Deletion Error" message={deleteError} />}
 
       {error && <ErrorMessage title="Failed to Load Data" message={error} onRetry={fetchData} />}
 
@@ -205,11 +237,53 @@ export const SitesPage: React.FC = () => {
                     <strong>Geofence Radius:</strong> {site.permitted_radius_m} m
                   </div>
                 )}
+                {isAdmin && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-neutral-200)' }}>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => {
+                        setDeleteError(null);
+                        setDeleteTarget(site);
+                      }}
+                      data-testid={`delete-site-${site.id}`}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                )}
               </div>
             </Card>
           ))}
         </div>
       )}
+
+      {/* Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTarget}
+        title="Delete Site"
+        message={
+          deleteTarget && (
+            <div>
+              <p>
+                Are you sure you want to permanently delete site <strong>{deleteTarget.name}</strong>?
+              </p>
+              <p style={{ marginTop: '8px', color: 'var(--color-neutral-600)' }}>
+                Project: {getProjectName(deleteTarget.project_id)}
+              </p>
+              <p style={{ marginTop: '8px', color: 'var(--color-neutral-600)' }}>
+                This will also permanently delete all attendance records, daily work entries, work orders, and worker assignments at this site.
+              </p>
+            </div>
+          )
+        }
+        confirmLabel="Delete Site"
+        isDeleting={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 };

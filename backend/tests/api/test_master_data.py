@@ -64,6 +64,18 @@ def test_clients_crud(client: TestClient, admin_token: str):
     assert len(response.json()) >= 1
     assert any(c["id"] == client_id for c in response.json())
 
+    # 3. Delete client
+    del_resp = client.delete(
+        f"/api/v1/admin/clients/{client_id}",
+        headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert del_resp.status_code == 200
+    assert del_resp.json()["status"] == "success"
+
+    # Confirm deleted
+    list_after = client.get("/api/v1/admin/clients", headers={"Authorization": f"Bearer {admin_token}"}).json()
+    assert not any(c["id"] == client_id for c in list_after)
+
 def test_projects_crud(client: TestClient, admin_token: str):
     # 1. Create a client first
     resp = client.post(
@@ -93,6 +105,17 @@ def test_projects_crud(client: TestClient, admin_token: str):
     )
     assert response.status_code == 200
     assert any(p["id"] == project_id for p in response.json())
+
+    # 4. Delete project
+    del_resp = client.delete(
+        f"/api/v1/admin/projects/{project_id}",
+        headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert del_resp.status_code == 200
+    assert del_resp.json()["status"] == "success"
+
+    list_after = client.get("/api/v1/admin/projects", headers={"Authorization": f"Bearer {admin_token}"}).json()
+    assert not any(p["id"] == project_id for p in list_after)
 
 def test_projects_invalid_client(client: TestClient, admin_token: str):
     response = client.post(
@@ -144,6 +167,46 @@ def test_sites_crud(client: TestClient, admin_token: str):
     )
     assert response.status_code == 200
     assert any(s["id"] == site_id for s in response.json())
+
+    # Delete Site
+    del_resp = client.delete(
+        f"/api/v1/admin/sites/{site_id}",
+        headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert del_resp.status_code == 200
+    assert del_resp.json()["status"] == "success"
+
+    list_after = client.get("/api/v1/admin/sites", headers={"Authorization": f"Bearer {admin_token}"}).json()
+    assert not any(s["id"] == site_id for s in list_after)
+
+def test_delete_master_data_rbac(client: TestClient, admin_token: str, employee_token: str):
+    resp = client.post(
+        "/api/v1/admin/clients",
+        json={"name": "RBAC Client"},
+        headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    cid = resp.json()["id"]
+
+    resp = client.post(
+        "/api/v1/admin/projects",
+        json={"name": "RBAC Project", "status": "Active", "client_id": cid},
+        headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    pid = resp.json()["id"]
+
+    resp = client.post(
+        "/api/v1/admin/sites",
+        json={"name": "RBAC Site", "project_id": pid},
+        headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    sid = resp.json()["id"]
+
+    assert client.delete(f"/api/v1/admin/sites/{sid}", headers={"Authorization": f"Bearer {employee_token}"}).status_code == 403
+    assert client.delete(f"/api/v1/admin/projects/{pid}", headers={"Authorization": f"Bearer {employee_token}"}).status_code == 403
+    assert client.delete(f"/api/v1/admin/clients/{cid}", headers={"Authorization": f"Bearer {employee_token}"}).status_code == 403
+
+    # Clean up with admin
+    assert client.delete(f"/api/v1/admin/clients/{cid}", headers={"Authorization": f"Bearer {admin_token}"}).status_code == 200
 
 def test_sites_invalid_project(client: TestClient, admin_token: str):
     response = client.post(

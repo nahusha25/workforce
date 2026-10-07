@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timezone
 
-from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from app.core.exceptions import BusinessRuleError, ConflictError, ForbiddenError, NotFoundError
 from app.models.auth import User
 from app.models.operations import EmployeeSiteAssignment
 from app.models.workforce import Employee, EmployeeRateHistory
@@ -223,3 +223,13 @@ class EmployeeService:
         )
         await self.repo.add_site_assignment(assignment)
         return await self._format_employee_response(employee)
+
+    async def delete_employee(self, employee_id: uuid.UUID, admin_user: User) -> None:
+        employee = await self.repo.get_employee_by_id(employee_id)
+        if not employee:
+            raise NotFoundError(f"Employee with ID {employee_id} not found")
+
+        if employee.user_id == admin_user.id:
+            raise BusinessRuleError("Cannot delete your own administrator account")
+
+        await self.repo.delete_employee_atomic(employee.id, employee.user_id)

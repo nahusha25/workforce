@@ -1,17 +1,27 @@
 import React, { useEffect, useState } from 'react';
-import { createClientApi, getClientsApi, type ClientResponseData } from '../api/masterData';
+import { createClientApi, deleteClientApi, getClientsApi, type ClientResponseData } from '../api/masterData';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { ConfirmDeleteModal } from '../components/ui/ConfirmDeleteModal';
 import { ErrorMessage } from '../components/ui/ErrorMessage';
 import { Input } from '../components/ui/Input';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { useAuth } from '../context/AuthContext';
 
 export const ClientsPage: React.FC = () => {
+  const { role } = useAuth();
+  const isAdmin = role === 'administrator';
+
   const [clients, setClients] = useState<ClientResponseData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Deletion state
+  const [deleteTarget, setDeleteTarget] = useState<ClientResponseData | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   // Form state
   const [showForm, setShowForm] = useState<boolean>(false);
@@ -69,6 +79,23 @@ export const ClientsPage: React.FC = () => {
     }
   };
 
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    setSuccessMsg(null);
+    try {
+      await deleteClientApi(deleteTarget.id);
+      setSuccessMsg(`Client "${deleteTarget.name}" deleted successfully.`);
+      setDeleteTarget(null);
+      await fetchClients();
+    } catch (err: any) {
+      setDeleteError(err.response?.data?.detail || err.message || 'Failed to delete client.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -78,16 +105,20 @@ export const ClientsPage: React.FC = () => {
             Manage client records for construction projects
           </p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ Add Client'}
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancel' : '+ Add Client'}
+          </Button>
+        )}
       </div>
 
       {successMsg && (
-        <div style={{ padding: '12px 16px', backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-800)', borderRadius: 'var(--radius-md)', fontWeight: 500 }}>
+        <div style={{ padding: '12px 16px', backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-800)', borderRadius: 'var(--radius-md)', fontWeight: 500 }} data-testid="success-banner">
           {successMsg}
         </div>
       )}
+
+      {deleteError && <ErrorMessage title="Deletion Error" message={deleteError} />}
 
       {error && <ErrorMessage title="Failed to Load Data" message={error} onRetry={fetchClients} />}
 
@@ -157,11 +188,50 @@ export const ClientsPage: React.FC = () => {
                 <div style={{ color: 'var(--color-neutral-500)', fontSize: 'var(--font-size-xs)', marginTop: '8px' }}>
                   Registered on: {new Date(client.created_at).toLocaleDateString()}
                 </div>
+                {isAdmin && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-neutral-200)' }}>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => {
+                        setDeleteError(null);
+                        setDeleteTarget(client);
+                      }}
+                      data-testid={`delete-client-${client.id}`}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                )}
               </div>
             </Card>
           ))}
         </div>
       )}
+
+      {/* Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTarget}
+        title="Delete Client"
+        message={
+          deleteTarget && (
+            <div>
+              <p>
+                Are you sure you want to permanently delete client <strong>{deleteTarget.name}</strong>?
+              </p>
+              <p style={{ marginTop: '8px', color: 'var(--color-neutral-600)' }}>
+                This will also permanently delete all associated projects, sites, and work records under this client.
+              </p>
+            </div>
+          )
+        }
+        confirmLabel="Delete Client"
+        isDeleting={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 };

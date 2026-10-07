@@ -63,3 +63,9 @@ export async function getAllEmployeesApi(pageSize: number = 100): Promise<Employ
   return allEmployees;
 }
 
+export async function deleteEmployeeApi(id: string): Promise<{ status: string; message: string }> {
+  const res = await apiClient.delete<{ status: string; message: string }>(`/employees/${id}`);
+  return res.data;
+}
+
+

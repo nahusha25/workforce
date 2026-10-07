@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   createProjectApi,
+  deleteProjectApi,
   getClientsApi,
   getProjectsApi,
   type ClientResponseData,
@@ -8,18 +9,28 @@ import {
 } from '../api/masterData';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { ConfirmDeleteModal } from '../components/ui/ConfirmDeleteModal';
 import { ErrorMessage } from '../components/ui/ErrorMessage';
 import { Input } from '../components/ui/Input';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { Select } from '../components/ui/Select';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { useAuth } from '../context/AuthContext';
 
 export const ProjectsPage: React.FC = () => {
+  const { role } = useAuth();
+  const isAdmin = role === 'administrator';
+
   const [projects, setProjects] = useState<ProjectResponseData[]>([]);
   const [clients, setClients] = useState<ClientResponseData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Deletion state
+  const [deleteTarget, setDeleteTarget] = useState<ProjectResponseData | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   // Form state
   const [showForm, setShowForm] = useState<boolean>(false);
@@ -89,6 +100,23 @@ export const ProjectsPage: React.FC = () => {
     }
   };
 
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    setSuccessMsg(null);
+    try {
+      await deleteProjectApi(deleteTarget.id);
+      setSuccessMsg(`Project "${deleteTarget.name}" deleted successfully.`);
+      setDeleteTarget(null);
+      await fetchData();
+    } catch (err: any) {
+      setDeleteError(err.response?.data?.detail || err.message || 'Failed to delete project.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const getClientName = (cid: string): string => {
     const c = clients.find((item) => item.id === cid);
     return c ? c.name : cid;
@@ -103,16 +131,20 @@ export const ProjectsPage: React.FC = () => {
             Manage construction projects linked to clients
           </p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ Add Project'}
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancel' : '+ Add Project'}
+          </Button>
+        )}
       </div>
 
       {successMsg && (
-        <div style={{ padding: '12px 16px', backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-800)', borderRadius: 'var(--radius-md)', fontWeight: 500 }}>
+        <div style={{ padding: '12px 16px', backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-800)', borderRadius: 'var(--radius-md)', fontWeight: 500 }} data-testid="success-banner">
           {successMsg}
         </div>
       )}
+
+      {deleteError && <ErrorMessage title="Deletion Error" message={deleteError} />}
 
       {error && <ErrorMessage title="Failed to Load Data" message={error} onRetry={fetchData} />}
 
@@ -205,11 +237,53 @@ export const ProjectsPage: React.FC = () => {
                     <strong>End Date:</strong> {project.end_date}
                   </div>
                 )}
+                {isAdmin && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-neutral-200)' }}>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => {
+                        setDeleteError(null);
+                        setDeleteTarget(project);
+                      }}
+                      data-testid={`delete-project-${project.id}`}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                )}
               </div>
             </Card>
           ))}
         </div>
       )}
+
+      {/* Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTarget}
+        title="Delete Project"
+        message={
+          deleteTarget && (
+            <div>
+              <p>
+                Are you sure you want to permanently delete project <strong>{deleteTarget.name}</strong>?
+              </p>
+              <p style={{ marginTop: '8px', color: 'var(--color-neutral-600)' }}>
+                Client: {getClientName(deleteTarget.client_id)} &bull; Status: {deleteTarget.status}
+              </p>
+              <p style={{ marginTop: '8px', color: 'var(--color-neutral-600)' }}>
+                This will also permanently delete all sites, work orders, and work entries under this project.
+              </p>
+            </div>
+          )
+        }
+        confirmLabel="Delete Project"
+        isDeleting={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 };

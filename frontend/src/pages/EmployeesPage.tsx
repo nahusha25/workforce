@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAllEmployeesApi, type EmployeeResponseData } from '../api/employee';
+import { getAllEmployeesApi, deleteEmployeeApi, type EmployeeResponseData } from '../api/employee';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { ConfirmDeleteModal } from '../components/ui/ConfirmDeleteModal';
 import { ErrorMessage } from '../components/ui/ErrorMessage';
 import { Input } from '../components/ui/Input';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
@@ -19,6 +20,12 @@ export const EmployeesPage: React.FC = () => {
   const [employees, setEmployees] = useState<EmployeeResponseData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Deletion state
+  const [deleteTarget, setDeleteTarget] = useState<EmployeeResponseData | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -93,6 +100,23 @@ export const EmployeesPage: React.FC = () => {
     }
   };
 
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    setSuccessMsg(null);
+    try {
+      await deleteEmployeeApi(deleteTarget.id);
+      setSuccessMsg(`Employee "${deleteTarget.name}" (${deleteTarget.employee_code}) was deleted successfully.`);
+      setDeleteTarget(null);
+      await fetchEmployees();
+    } catch (err: any) {
+      setDeleteError(err.response?.data?.detail || err.message || 'Failed to delete employee.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className={styles.container}>
       {/* Header with Title, True Total Count Badge, and Action */}
@@ -115,6 +139,23 @@ export const EmployeesPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {successMsg && (
+        <div
+          style={{
+            padding: '12px 16px',
+            backgroundColor: 'var(--color-primary-50)',
+            color: 'var(--color-primary-800)',
+            borderRadius: 'var(--radius-md)',
+            fontWeight: 500,
+          }}
+          data-testid="success-banner"
+        >
+          {successMsg}
+        </div>
+      )}
+
+      {deleteError && <ErrorMessage title="Deletion Error" message={deleteError} />}
 
       {error && (
         <ErrorMessage
@@ -210,6 +251,7 @@ export const EmployeesPage: React.FC = () => {
                 <th>Trade Roles</th>
                 <th>Site Assignment</th>
                 <th>Status</th>
+                {isAdmin && <th style={{ textAlign: 'right' }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -253,12 +295,52 @@ export const EmployeesPage: React.FC = () => {
                   <td>
                     <StatusBadge status={emp.is_active ? 'active' : 'inactive'} />
                   </td>
+                  {isAdmin && (
+                    <td style={{ textAlign: 'right' }}>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => {
+                          setDeleteError(null);
+                          setDeleteTarget(emp);
+                        }}
+                        data-testid={`delete-emp-${emp.id}`}
+                      >
+                        Delete
+                      </Button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      {/* Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTarget}
+        title="Delete Employee"
+        message={
+          deleteTarget && (
+            <div>
+              <p>
+                Are you sure you want to permanently delete employee{' '}
+                <strong>{deleteTarget.name}</strong> ({deleteTarget.employee_code})?
+              </p>
+              <p style={{ marginTop: '8px', color: 'var(--color-neutral-600)' }}>
+                Mobile: {deleteTarget.mobile_id} &bull; System Role: {deleteTarget.system_role}
+              </p>
+            </div>
+          )
+        }
+        confirmLabel="Delete Employee"
+        isDeleting={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 };

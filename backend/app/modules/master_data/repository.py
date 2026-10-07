@@ -1,10 +1,25 @@
 import uuid
 from collections.abc import Sequence
 
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.operations import Activity, Client, Material, Project, Site, WorkOrder
+from app.models.operations import (
+    Activity,
+    AttendanceRecord,
+    Client,
+    DailyWorkEntry,
+    EmployeeSiteAssignment,
+    ExceptionFlag,
+    Material,
+    MaterialTransaction,
+    Project,
+    Site,
+    VerificationRecord,
+    WorkOrder,
+    WorkPhoto,
+)
 from app.models.workforce import Role
 
 
@@ -139,4 +154,100 @@ class MasterDataRepository:
         await self.db.commit()
         await self.db.refresh(material)
         return material
+
+    async def _delete_site_internal(self, site_id: uuid.UUID) -> None:
+        # 1. Site assignments
+        await self.db.execute(delete(EmployeeSiteAssignment).where(EmployeeSiteAssignment.site_id == site_id))
+
+        # 2. Daily work entries at site
+        res_dwe = await self.db.execute(select(DailyWorkEntry.id).where(DailyWorkEntry.site_id == site_id))
+        dwe_ids = res_dwe.scalars().all()
+        if dwe_ids:
+            await self.db.execute(delete(WorkPhoto).where(WorkPhoto.daily_work_entry_id.in_(dwe_ids)))
+            res_mat = await self.db.execute(
+                select(MaterialTransaction.id).where(MaterialTransaction.daily_work_entry_id.in_(dwe_ids))
+            )
+            mat_ids = res_mat.scalars().all()
+            if mat_ids:
+                await self.db.execute(delete(VerificationRecord).where(VerificationRecord.material_transaction_id.in_(mat_ids)))
+                await self.db.execute(
+                    delete(ExceptionFlag).where((ExceptionFlag.entity_type == "material") & (ExceptionFlag.entity_id.in_(mat_ids)))
+                )
+                await self.db.execute(delete(MaterialTransaction).where(MaterialTransaction.id.in_(mat_ids)))
+            await self.db.execute(delete(VerificationRecord).where(VerificationRecord.daily_work_entry_id.in_(dwe_ids)))
+            await self.db.execute(
+                delete(ExceptionFlag).where((ExceptionFlag.entity_type == "daily_work") & (ExceptionFlag.entity_id.in_(dwe_ids)))
+            )
+            await self.db.execute(delete(DailyWorkEntry).where(DailyWorkEntry.id.in_(dwe_ids)))
+
+        # 3. Any additional material transactions at site
+        res_mat_site = await self.db.execute(select(MaterialTransaction.id).where(MaterialTransaction.site_id == site_id))
+        mat_site_ids = res_mat_site.scalars().all()
+        if mat_site_ids:
+            await self.db.execute(delete(VerificationRecord).where(VerificationRecord.material_transaction_id.in_(mat_site_ids)))
+            await self.db.execute(
+                delete(ExceptionFlag).where((ExceptionFlag.entity_type == "material") & (ExceptionFlag.entity_id.in_(mat_site_ids)))
+            )
+            await self.db.execute(delete(MaterialTransaction).where(MaterialTransaction.id.in_(mat_site_ids)))
+
+        # 4. Attendance records at site
+        res_att = await self.db.execute(select(AttendanceRecord.id).where(AttendanceRecord.site_id == site_id))
+        att_ids = res_att.scalars().all()
+        if att_ids:
+            res_dwe_att = await self.db.execute(
+                select(DailyWorkEntry.id).where(DailyWorkEntry.attendance_record_id.in_(att_ids))
+            )
+            dwe_att_ids = res_dwe_att.scalars().all()
+            if dwe_att_ids:
+                await self.db.execute(delete(WorkPhoto).where(WorkPhoto.daily_work_entry_id.in_(dwe_att_ids)))
+                await self.db.execute(delete(VerificationRecord).where(VerificationRecord.daily_work_entry_id.in_(dwe_att_ids)))
+                await self.db.execute(
+                    delete(ExceptionFlag).where((ExceptionFlag.entity_type == "daily_work") & (ExceptionFlag.entity_id.in_(dwe_att_ids)))
+                )
+                await self.db.execute(delete(DailyWorkEntry).where(DailyWorkEntry.id.in_(dwe_att_ids)))
+            await self.db.execute(delete(VerificationRecord).where(VerificationRecord.attendance_record_id.in_(att_ids)))
+            await self.db.execute(
+                delete(ExceptionFlag).where((ExceptionFlag.entity_type == "attendance") & (ExceptionFlag.entity_id.in_(att_ids)))
+            )
+            await self.db.execute(delete(AttendanceRecord).where(AttendanceRecord.id.in_(att_ids)))
+
+        # 5. Work orders at site
+        res_wo = await self.db.execute(select(WorkOrder.id).where(WorkOrder.site_id == site_id))
+        wo_ids = res_wo.scalars().all()
+        if wo_ids:
+            await self.db.execute(update(DailyWorkEntry).where(DailyWorkEntry.work_order_id.in_(wo_ids)).values(work_order_id=None))
+            await self.db.execute(delete(WorkOrder).where(WorkOrder.id.in_(wo_ids)))
+
+        # 6. Site itself
+        await self.db.execute(delete(Site).where(Site.id == site_id))
+
+    async def _delete_project_internal(self, project_id: uuid.UUID) -> None:
+        res_sites = await self.db.execute(select(Site.id).where(Site.project_id == project_id))
+        site_ids = res_sites.scalars().all()
+        for sid in site_ids:
+            await self._delete_site_internal(sid)
+
+        res_wo = await self.db.execute(select(WorkOrder.id).where(WorkOrder.project_id == project_id))
+        wo_ids = res_wo.scalars().all()
+        if wo_ids:
+            await self.db.execute(update(DailyWorkEntry).where(DailyWorkEntry.work_order_id.in_(wo_ids)).values(work_order_id=None))
+            await self.db.execute(delete(WorkOrder).where(WorkOrder.id.in_(wo_ids)))
+
+        await self.db.execute(delete(Project).where(Project.id == project_id))
+
+    async def delete_site_atomic(self, site_id: uuid.UUID) -> None:
+        await self._delete_site_internal(site_id)
+        await self.db.commit()
+
+    async def delete_project_atomic(self, project_id: uuid.UUID) -> None:
+        await self._delete_project_internal(project_id)
+        await self.db.commit()
+
+    async def delete_client_atomic(self, client_id: uuid.UUID) -> None:
+        res_projs = await self.db.execute(select(Project.id).where(Project.client_id == client_id))
+        proj_ids = res_projs.scalars().all()
+        for pid in proj_ids:
+            await self._delete_project_internal(pid)
+        await self.db.execute(delete(Client).where(Client.id == client_id))
+        await self.db.commit()
 

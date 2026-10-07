@@ -408,3 +408,99 @@ def test_unauthenticated_requests(client: TestClient):
     assert client.post("/api/v1/employees", json={}).status_code == 401
     assert client.get("/api/v1/employees").status_code == 401
     assert client.get("/api/v1/employees/me").status_code == 401
+    assert client.delete(f"/api/v1/employees/{uuid.uuid4()}").status_code == 401
+
+
+def test_delete_employee_success(client: TestClient, admin_user, setup_master_data):
+    admin_user_obj, admin_token = admin_user
+    master = setup_master_data
+
+    # 1. Create employee
+    mobile = f"+9198{str(uuid.uuid4().int)[:8]}"
+    create_payload = {
+        "employee_code": f"EMP-DEL-{str(uuid.uuid4().int)[:4]}",
+        "mobile_number": mobile,
+        "name": "Delete Me Worker",
+        "system_role": "employee",
+        "trade_role_ids": [str(master["role1_id"])],
+        "rate_type": "daily",
+        "rate_amount": 750.00,
+        "site_ids": [str(master["site1_id"])],
+    }
+    resp = client.post(
+        "/api/v1/employees",
+        json=create_payload,
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 201
+    emp_id = resp.json()["id"]
+
+    # 2. Delete employee
+    del_resp = client.delete(
+        f"/api/v1/employees/{emp_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert del_resp.status_code == 200
+    assert del_resp.json()["status"] == "success"
+
+    # 3. Confirm 404
+    get_resp = client.get(
+        f"/api/v1/employees/{emp_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert get_resp.status_code == 404
+
+
+def test_delete_employee_rbac(client: TestClient, employee_user, admin_user, setup_master_data):
+    admin_user_obj, admin_token = admin_user
+    _, _, emp_token = employee_user
+    master = setup_master_data
+
+    # Create employee
+    mobile = f"+9197{str(uuid.uuid4().int)[:8]}"
+    create_payload = {
+        "employee_code": f"EMP-DEL-RBAC-{str(uuid.uuid4().int)[:4]}",
+        "mobile_number": mobile,
+        "name": "RBAC Worker",
+        "system_role": "employee",
+        "trade_role_ids": [str(master["role1_id"])],
+        "rate_type": "daily",
+        "rate_amount": 600.00,
+        "site_ids": [str(master["site1_id"])],
+    }
+    resp = client.post(
+        "/api/v1/employees",
+        json=create_payload,
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    emp_id = resp.json()["id"]
+
+    # Employee tries to delete -> 403
+    del_resp = client.delete(
+        f"/api/v1/employees/{emp_id}",
+        headers={"Authorization": f"Bearer {emp_token}"},
+    )
+    assert del_resp.status_code == 403
+
+
+def test_delete_employee_cannot_delete_self(client: TestClient, admin_user, sync_db_session: Session):
+    admin_user_obj, admin_token = admin_user
+    admin_emp = sync_db_session.query(Employee).filter(Employee.user_id == admin_user_obj.id).first()
+
+    del_resp = client.delete(
+        f"/api/v1/employees/{admin_emp.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert del_resp.status_code in [400, 422]
+    assert "Cannot delete your own administrator account" in del_resp.text
+
+
+def test_delete_employee_not_found(client: TestClient, admin_user):
+    admin_user_obj, admin_token = admin_user
+
+    del_resp = client.delete(
+        f"/api/v1/employees/{uuid.uuid4()}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert del_resp.status_code == 404
+

@@ -83,3 +83,14 @@ async def assign_site(
     current_user: User = Depends(require_role(["administrator"])),
 ):
     return await service.assign_site(employee_id=id, site_id=assignment_in.site_id)
+
+
+# EMP-007: Delete employee
+@router.delete("/{id}", status_code=status.HTTP_200_OK)
+async def delete_employee(
+    id: uuid.UUID,
+    service: EmployeeService = Depends(get_employee_service),
+    current_user: User = Depends(require_role(["administrator"])),
+):
+    await service.delete_employee(employee_id=id, admin_user=current_user)
+    return {"status": "success", "message": "Employee deleted successfully"}

@@ -200,3 +200,21 @@ class MasterDataService:
 
         return await self.repo.update_material(mat)
 
+    async def delete_site(self, site_id: uuid.UUID) -> None:
+        site = await self.repo.get_site_by_id(site_id)
+        if not site:
+            raise NotFoundError(f"Site with id {site_id} not found")
+        await self.repo.delete_site_atomic(site_id)
+
+    async def delete_project(self, project_id: uuid.UUID) -> None:
+        project = await self.repo.get_project_by_id(project_id)
+        if not project:
+            raise NotFoundError(f"Project with id {project_id} not found")
+        await self.repo.delete_project_atomic(project_id)
+
+    async def delete_client(self, client_id: uuid.UUID) -> None:
+        client = await self.repo.get_client_by_id(client_id)
+        if not client:
+            raise NotFoundError(f"Client with id {client_id} not found")
+        await self.repo.delete_client_atomic(client_id)
+

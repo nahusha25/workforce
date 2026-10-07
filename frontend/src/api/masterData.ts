@@ -75,6 +75,11 @@ export async function createClientApi(data: ClientCreateData): Promise<ClientRes
   return res.data;
 }
 
+export async function deleteClientApi(id: string): Promise<{ status: string; message: string }> {
+  const res = await apiClient.delete<{ status: string; message: string }>(`/admin/clients/${id}`);
+  return res.data;
+}
+
 export async function getProjectsApi(): Promise<ProjectResponseData[]> {
   const res = await apiClient.get<ProjectResponseData[]>('/admin/projects');
   return res.data;
@@ -85,6 +90,11 @@ export async function createProjectApi(data: ProjectCreateData): Promise<Project
   return res.data;
 }
 
+export async function deleteProjectApi(id: string): Promise<{ status: string; message: string }> {
+  const res = await apiClient.delete<{ status: string; message: string }>(`/admin/projects/${id}`);
+  return res.data;
+}
+
 export async function getSitesApi(): Promise<SiteResponseData[]> {
   const res = await apiClient.get<SiteResponseData[]>('/admin/sites');
   return res.data;
@@ -92,6 +102,11 @@ export async function getSitesApi(): Promise<SiteResponseData[]> {
 
 export async function createSiteApi(data: SiteCreateData): Promise<SiteResponseData> {
   const res = await apiClient.post<SiteResponseData>('/admin/sites', data);
+  return res.data;
+}
+
+export async function deleteSiteApi(id: string): Promise<{ status: string; message: string }> {
+  const res = await apiClient.delete<{ status: string; message: string }>(`/admin/sites/${id}`);
   return res.data;
 }
 

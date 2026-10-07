@@ -16,6 +16,7 @@ vi.mock('../api/employee', async (importOriginal) => {
     ...actual,
     getAllEmployeesApi: vi.fn(),
     getEmployeesApi: vi.fn(),
+    deleteEmployeeApi: vi.fn(),
   };
 });
 
@@ -278,4 +279,56 @@ describe('EmployeesPage', () => {
     });
     expect(screen.queryByText('Employee Directory')).not.toBeInTheDocument();
   });
+
+  it('allows administrator to delete an employee with confirmation modal', async () => {
+    vi.mocked(employeeApi.getAllEmployeesApi).mockResolvedValue(mockEmployees);
+    vi.mocked(employeeApi.deleteEmployeeApi).mockResolvedValue({ status: 'success', message: 'Employee deleted' });
+
+    renderWithRoleGuard('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByText('John Field Worker')).toBeInTheDocument();
+    });
+
+    // Check delete button exists on row
+    const deleteBtn = screen.getByTestId('delete-emp-emp-1');
+    expect(deleteBtn).toBeInTheDocument();
+
+    // Click delete -> modal opens
+    fireEvent.click(deleteBtn);
+    expect(screen.getByTestId('confirm-delete-modal')).toBeInTheDocument();
+    expect(screen.getByText(/Are you sure you want to permanently delete employee/)).toBeInTheDocument();
+
+    // Cancel deletion
+    fireEvent.click(screen.getByTestId('cancel-delete-btn'));
+    expect(screen.queryByTestId('confirm-delete-modal')).not.toBeInTheDocument();
+    expect(employeeApi.deleteEmployeeApi).not.toHaveBeenCalled();
+
+    // Click delete again and confirm
+    fireEvent.click(deleteBtn);
+    expect(screen.getByTestId('confirm-delete-modal')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('confirm-delete-btn'));
+
+    await waitFor(() => {
+      expect(employeeApi.deleteEmployeeApi).toHaveBeenCalledWith('emp-1');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('success-banner')).toBeInTheDocument();
+    });
+  });
+
+  it('hides delete buttons from director role', async () => {
+    vi.mocked(employeeApi.getAllEmployeesApi).mockResolvedValue(mockEmployees);
+
+    renderWithRoleGuard('director');
+
+    await waitFor(() => {
+      expect(screen.getByText('John Field Worker')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('delete-emp-emp-1')).not.toBeInTheDocument();
+  });
 });
+

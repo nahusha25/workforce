@@ -52,6 +52,15 @@ async def list_clients(
 ):
     return await service.get_clients(skip=skip, limit=limit)
 
+@router.delete("/clients/{id}", status_code=status.HTTP_200_OK)
+async def delete_client(
+    id: uuid.UUID,
+    service: MasterDataService = Depends(get_master_data_service),
+    current_user: User = Depends(require_role(["administrator"]))
+):
+    await service.delete_client(id)
+    return {"status": "success", "message": "Client deleted successfully"}
+
 # ADM-003: Create Project
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
@@ -71,6 +80,15 @@ async def list_projects(
 ):
     return await service.get_projects(skip=skip, limit=limit)
 
+@router.delete("/projects/{id}", status_code=status.HTTP_200_OK)
+async def delete_project(
+    id: uuid.UUID,
+    service: MasterDataService = Depends(get_master_data_service),
+    current_user: User = Depends(require_role(["administrator"]))
+):
+    await service.delete_project(id)
+    return {"status": "success", "message": "Project deleted successfully"}
+
 # ADM-005: Create Site
 @router.post("/sites", response_model=SiteResponse, status_code=status.HTTP_201_CREATED)
 async def create_site(
@@ -89,6 +107,15 @@ async def list_sites(
     current_user: User = Depends(require_role(["administrator"]))
 ):
     return await service.get_sites(skip=skip, limit=limit)
+
+@router.delete("/sites/{id}", status_code=status.HTTP_200_OK)
+async def delete_site(
+    id: uuid.UUID,
+    service: MasterDataService = Depends(get_master_data_service),
+    current_user: User = Depends(require_role(["administrator"]))
+):
+    await service.delete_site(id)
+    return {"status": "success", "message": "Site deleted successfully"}
 
 # ADM-007: List Roles
 @router.get("/roles", response_model=list[RoleResponse])

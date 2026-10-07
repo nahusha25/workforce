@@ -1,0 +1,126 @@
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 9999;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.modalContent {
+  background: var(--color-surface, #ffffff);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 480px;
+  overflow: hidden;
+  border: 1px solid var(--color-neutral-200, #e2e8f0);
+  animation: scaleIn 0.15s ease-out;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--color-neutral-200, #e2e8f0);
+  background-color: var(--color-danger-50, #fef2f2);
+}
+
+.titleArea {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.warningIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--color-danger-100, #fee2e2);
+  color: var(--color-danger-600, #dc2626);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: var(--font-size-lg, 1.125rem);
+  font-weight: 700;
+  color: var(--color-danger-900, #7f1d1d);
+}
+
+.closeButton {
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--color-neutral-500, #64748b);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm, 4px);
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.closeButton:hover {
+  color: var(--color-neutral-800, #1e293b);
+  background-color: var(--color-neutral-100, #f1f5f9);
+}
+
+.modalBody {
+  padding: 24px;
+  color: var(--color-neutral-700, #334155);
+  font-size: var(--font-size-sm, 0.875rem);
+  line-height: 1.6;
+}
+
+.warningNotice {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-md, 8px);
+  color: #92400e;
+  font-size: var(--font-size-xs, 0.75rem);
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.modalFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--color-neutral-200, #e2e8f0);
+  background-color: var(--color-neutral-50, #f8fafc);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
