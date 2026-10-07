@@ -29,7 +29,7 @@ The **i-Workforce Management Web Application** is designed to streamline field w
 | Phase | Name | Target Deliverables | Current Status | % Complete |
 |---|---|---|---|---|
 | **Phase 0** | Governance & Architecture | Master docs, ERD, coding & testing standards | **Complete** | 100% |
-| **Phase 1** | Employee Onboarding & Login (Page 1) | OTP login, session tokens, employee master, admin screens | **Substantially Complete** | 90% |
+| **Phase 1** | Employee Onboarding & Login (Page 1) | OTP login, session tokens, employee master, admin screens, employee directory | **Substantially Complete** | 95% |
 | **Phase 2** | Daily Attendance (Page 2) | GPS check-in/out, geofence check, supervisor override | **Partial / Critical Defect** | 65% |
 | **Phase 3** | Daily Work & Material (Page 3) | Work entry, camera photos, material purchases, draft save, admin master data | **Substantially Complete (Feature Complete)** | 95% |
 | **Phase 4** | Supervisor Verification (Page 4) | EOD queue, approve/reject/return, remarks, read-only lock | **Substantially Complete** | 80% |
@@ -213,6 +213,7 @@ The source document mandates a **maximum of 5 application pages**:
 - **Implemented Pages**:
   - `LoginPage.tsx`: Full mobile number input, 6-digit OTP verification, countdown timer.
   - `OnboardingPage.tsx`: Form for admin onboarding with roles, rates, and supervisor dropdown.
+  - `EmployeesPage.tsx`: Employee directory and management page (`/admin/employees`) for `administrator` and `director` roles with accurate total count badge, real-time search, role/status filtering, client-side pagination aggregation (`getAllEmployeesApi`), and `+ Onboard Employee` navigation action.
   - `ProfilePage.tsx`: Displays worker's identity, active rates, trade roles, and sites.
   - `AttendancePage.tsx`: One-touch Check In / Check Out with GPS signal indicator.
   - `ClientsPage.tsx`, `ProjectsPage.tsx`, `SitesPage.tsx`: Master data management.
@@ -231,8 +232,8 @@ The source document mandates a **maximum of 5 application pages**:
 - All 24 architectural documents, canonical ERD v3.0, testing strategies, and operating models exist.
 
 ### Phase 1: Employee Onboarding & Login
-- **Status:** **90% COMPLETED**
-- **Completed:** Database migrations, auth service, rate tracking, onboarding UI, and profile UI.
+- **Status:** **95% COMPLETED**
+- **Completed:** Database migrations, auth service, rate tracking, onboarding UI, profile UI, and Employee Directory page (`EmployeesPage.tsx` at `/admin/employees` with accurate total count via client-side pagination aggregation `getAllEmployeesApi`, search/filter controls, and role-guarded access for `administrator` and `director`; verified by **7/7** new unit tests; full frontend suite: **255/255** passed).
 - **Missing / Partial:**
   - Production SMS Gateway integration (currently mock console).
   - Worker self-registration (currently admin-only).
@@ -335,6 +336,7 @@ The source document mandates a **maximum of 5 application pages**:
 - [x] `FE-003`: Administrator dashboard for client, project, and site setup.
 - [x] `FE-004`: Employee onboarding form with multi-role and rate selection.
 - [x] `FE-005`: Profile page displaying authenticated user details and assignments.
+- [x] `FE-006`: Build Employee Directory & Management page (`src/pages/EmployeesPage.tsx`, `EmployeesPage.module.css`, route `/admin/employees`) — accessible to `administrator` and `director` roles (matching backend `GET /api/v1/employees` RBAC and admin navigation conventions); renders complete directory table (name, employee code, mobile, trade role badges, site assignment, active status badge) with total employee count badge; implements client-side pagination aggregation (`getAllEmployeesApi` in `src/api/employee.ts` incrementing `skip += 100` until page size < 100) ensuring true total count accuracy beyond the 100-limit per page; features real-time search across name/code/mobile, role filter, active status filter, and `+ Onboard Employee` navigation button (scoped to administrator role); verified by **7/7** new tests in `EmployeesPage.test.tsx`. Frontend total: **255/255** vitest tests passing across 24 test files.
 - [ ] `UX-001`: Add PWA web app manifest (`manifest.json`) and service worker for mobile install.
 - [ ] `UX-002`: Introduce Kannada and Hindi interface labels (`REQ-UX-003`).
 - [ ] `PROD-001`: Connect SMS service to real gateway (Twilio / AWS SNS) with env configuration.
@@ -443,7 +445,7 @@ The source document mandates a **maximum of 5 application pages**:
 - [x] `FE-022`: Build reusable dashboard filter bar (date range, site, employee). ✅ **Complete** — FilterBar component with controlled state; integrated into DirectorDashboardPage and ReportPage. Confirmed: 248/248 frontend tests passed (2026-10-01).
 - [x] `FE-023`: Build Reports page with tabular display for 6 report types. ✅ **Complete** — ReportTable component; all 6 report types; currency values use `formatDecimal` helper (2 decimal places). Confirmed: 248/248 frontend tests passed (2026-10-01).
 - [x] `FE-024`: Build Report Export button component (Excel / PDF download). ✅ **Complete** — ExportButtonGroup triggers streaming download from `/api/v1/reports/{type}/export`; format selection (xlsx/pdf). Confirmed: 248/248 frontend tests passed (2026-10-01).
-- [x] `FE-025`: Build Director Dashboard & Invoicing UI components. ✅ **Complete** — dashboard and reports UI (director+administrator routing, Sidebar nav entry, MetricCard/DashboardCharts/ReportTable/ExportButtonGroup components) delivered, integrated, and verified. Confirmed: **248/248** frontend tests passed (2026-10-01).
+- [x] `FE-025`: Build Director Dashboard & Invoicing UI components. ✅ **Complete** — dashboard and reports UI (director+administrator routing, Sidebar nav entry, MetricCard/DashboardCharts/ReportTable/ExportButtonGroup components) delivered, integrated, and verified. Confirmed: **248/248** frontend tests passed (2026-10-01; updated to **255/255** frontend tests passing across 24 test files following FE-006 EmployeesPage addition).
 - [ ] `FE-026`: Build Weekly Employee Payment statement UI.
 - [ ] `TEST-011`: Write database and financial rate calculation test suite.
 - [ ] `TEST-012`: Write report generation and export service tests.
