@@ -245,3 +245,18 @@
   background-color: #f8fafc;
 }
 
+.unassignedAlert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background-color: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-left: 4px solid #f59e0b;
+  color: #78350f;
+  padding: 16px 20px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+

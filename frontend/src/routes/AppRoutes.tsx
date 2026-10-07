@@ -35,10 +35,10 @@ export const AppRoutes: React.FC = () => {
           <Route element={<AppLayout />}>
             <Route path="/" element={<Navigate to="/profile" replace />} />
             <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/attendance" element={<AttendancePage />} />
 
-            {/* Employee Daily Work Route */}
+            {/* Employee Only Routes */}
             <Route element={<RoleGuard allowedRoles={['employee']} />}>
+              <Route path="/attendance" element={<AttendancePage />} />
               <Route path="/daily-work" element={<DailyWorkEntryPage />} />
             </Route>
 

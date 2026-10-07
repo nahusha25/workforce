@@ -19,8 +19,8 @@ vi.mock('../components/ui/Card', () => ({
 }));
 
 vi.mock('../components/ui/Button', () => ({
-  Button: ({ children, onClick, isLoading, disabled }: any) => (
-    <button onClick={onClick} disabled={disabled || isLoading} data-testid="button">
+  Button: ({ children, onClick, isLoading, disabled, 'data-testid': testId, ...rest }: any) => (
+    <button onClick={onClick} disabled={disabled || isLoading} data-testid={testId || "button"} {...rest}>
       {isLoading ? 'Loading...' : children}
     </button>
   )
@@ -33,6 +33,9 @@ vi.mock('../api/attendance', () => ({
   checkOut: vi.fn(),
 }));
 
+import { AuthContext } from '../context/AuthContext';
+import type { EmployeeProfile } from '../types/auth';
+
 // Mock Geolocation hook
 vi.mock('../hooks/useGeolocation', () => ({
   useGeolocation: vi.fn(),
@@ -40,11 +43,40 @@ vi.mock('../hooks/useGeolocation', () => ({
 
 const mockGetLocation = vi.fn();
 
-const renderComponent = () =>
+const defaultAuthUser: EmployeeProfile = {
+  id: 'emp-1',
+  user_id: 'user-1',
+  employee_code: 'EMP-001',
+  mobile_id: '+919123456789',
+  name: 'Standard Employee',
+  system_role: 'employee',
+  is_active: true,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+  trade_roles: [],
+  active_sites: [{ id: 'site-1', name: 'Central Station Site' }],
+};
+
+const renderComponent = (user: EmployeeProfile | null = defaultAuthUser) =>
   render(
-    <MemoryRouter>
-      <AttendancePage />
-    </MemoryRouter>
+    <AuthContext.Provider
+      value={{
+        user,
+        role: user?.system_role || null,
+        accessToken: 'mock-token',
+        isAuthenticated: !!user,
+        isLoading: false,
+        error: null,
+        requestOtp: vi.fn(),
+        verifyOtp: vi.fn(),
+        logout: vi.fn(),
+        clearError: vi.fn(),
+      }}
+    >
+      <MemoryRouter>
+        <AttendancePage />
+      </MemoryRouter>
+    </AuthContext.Provider>
   );
 
 describe('AttendancePage', () => {
@@ -331,5 +363,32 @@ describe('AttendancePage', () => {
       expect(screen.getByText('Successfully checked out!')).toBeInTheDocument();
       expect(getAttendanceRecords).toHaveBeenCalled();
     });
+  });
+
+  it('displays unassigned message and hides check-in button when employee has no active site assignments', async () => {
+    const unassignedUser: EmployeeProfile = {
+      ...defaultAuthUser,
+      active_sites: [],
+    };
+    renderComponent(unassignedUser);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('unassigned-site-message')).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("You don't have an active site assignment yet — contact your administrator")
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('attendance-check-in-btn')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /CHECK IN/i })).not.toBeInTheDocument();
+  });
+
+  it('renders check-in button when employee has at least one active site assignment', async () => {
+    renderComponent(defaultAuthUser);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('attendance-check-in-btn')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /CHECK IN/i })).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('unassigned-site-message')).not.toBeInTheDocument();
   });
 });

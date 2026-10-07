@@ -8,8 +8,11 @@ import { normalizeError } from '../api/client';
 import { MapPin, LogIn, LogOut, Loader2, AlertCircle, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import styles from './AttendancePage.module.css';
 import { AxiosError } from 'axios';
+import { useAuth } from '../context/AuthContext';
 
 export const AttendancePage: React.FC = () => {
+  const { user } = useAuth();
+  const hasActiveSites = Boolean(user?.active_sites && user.active_sites.length > 0);
   const { location, error: geoError, loading: geoLoading, getLocation } = useGeolocation();
   
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
@@ -150,34 +153,43 @@ export const AttendancePage: React.FC = () => {
               </div>
             )}
 
-            {/* Action Buttons */}
-            <div className={styles.buttonsGroup}>
-              {!isCheckedIn ? (
-                <Button 
-                  variant="primary" 
-                  size="lg" 
-                  fullWidth 
-                  onClick={() => handleAction('check-in')}
-                  isLoading={submitting || geoLoading}
-                  disabled={submitting || !!geoError || !location}
-                  className={styles.checkInBtn}
-                >
-                  <LogIn className={styles.btnIcon} /> CHECK IN
-                </Button>
-              ) : (
-                <Button 
-                  variant="danger" 
-                  size="lg" 
-                  fullWidth 
-                  onClick={() => handleAction('check-out')}
-                  isLoading={submitting || geoLoading}
-                  disabled={submitting || !!geoError || !location}
-                  className={styles.checkOutBtn}
-                >
-                  <LogOut className={styles.btnIcon} /> CHECK OUT
-                </Button>
-              )}
-            </div>
+            {/* Action Buttons or Unassigned Site Alert */}
+            {!hasActiveSites ? (
+              <div className={styles.unassignedAlert} data-testid="unassigned-site-message" role="alert">
+                <AlertTriangle size={20} style={{ flexShrink: 0 }} />
+                <span>You don't have an active site assignment yet — contact your administrator</span>
+              </div>
+            ) : (
+              <div className={styles.buttonsGroup}>
+                {!isCheckedIn ? (
+                  <Button 
+                    variant="primary" 
+                    size="lg" 
+                    fullWidth 
+                    onClick={() => handleAction('check-in')}
+                    isLoading={submitting || geoLoading}
+                    disabled={submitting || !!geoError || !location}
+                    className={styles.checkInBtn}
+                    data-testid="attendance-check-in-btn"
+                  >
+                    <LogIn className={styles.btnIcon} /> CHECK IN
+                  </Button>
+                ) : (
+                  <Button 
+                    variant="danger" 
+                    size="lg" 
+                    fullWidth 
+                    onClick={() => handleAction('check-out')}
+                    isLoading={submitting || geoLoading}
+                    disabled={submitting || !!geoError || !location}
+                    className={styles.checkOutBtn}
+                    data-testid="attendance-check-out-btn"
+                  >
+                    <LogOut className={styles.btnIcon} /> CHECK OUT
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Card>

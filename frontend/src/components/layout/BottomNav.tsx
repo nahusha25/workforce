@@ -16,12 +16,14 @@ export const BottomNav: React.FC = () => {
       >
         <span>Profile</span>
       </NavLink>
-      <NavLink
-        to="/attendance"
-        className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
-      >
-        <span>Attendance</span>
-      </NavLink>
+      {role === 'employee' && (
+        <NavLink
+          to="/attendance"
+          className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+        >
+          <span>Attendance</span>
+        </NavLink>
+      )}
       {role === 'employee' && (
         <NavLink
           to="/daily-work"

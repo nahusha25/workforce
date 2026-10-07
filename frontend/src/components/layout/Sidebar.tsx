@@ -19,12 +19,14 @@ export const Sidebar: React.FC = () => {
         >
           My Profile
         </NavLink>
-        <NavLink
-          to="/attendance"
-          className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
-        >
-          My Attendance
-        </NavLink>
+        {role === 'employee' && (
+          <NavLink
+            to="/attendance"
+            className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+          >
+            My Attendance
+          </NavLink>
+        )}
         {role === 'employee' && (
           <NavLink
             to="/daily-work"

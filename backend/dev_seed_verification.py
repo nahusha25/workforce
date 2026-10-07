@@ -49,25 +49,50 @@ async def seed_messy_verification_day():
         print("SEEDING MESSY DAY FOR MANUAL VERIFICATION TESTING")
         print("=" * 60)
 
-        # 1. Locate Target Employee
-        # First try finding Nahus Test Worker by code/mobile or name
-        stmt_emp = select(Employee).where(
-            (Employee.employee_code == "EMP-77604")
-            | (Employee.mobile_id == "+917760443750")
-            | (Employee.name.ilike("%Nahus%"))
-        )
+        # 0. Ensure administrator accounts do NOT have any active site assignments
+        stmt_admin_users = select(User).where(User.role == "administrator")
+        admin_users = (await session.execute(stmt_admin_users)).scalars().all()
+        for a_user in admin_users:
+            stmt_a_emp = select(Employee).where(Employee.user_id == a_user.id)
+            a_emp = (await session.execute(stmt_a_emp)).scalars().first()
+            if a_emp:
+                await session.execute(
+                    delete(EmployeeSiteAssignment).where(EmployeeSiteAssignment.employee_id == a_emp.id)
+                )
+                print(f"[OK] Dropped any site assignments for Administrator: {a_user.mobile_id} (Employee profile preserved)")
+
+        # 1. Locate or Create Dedicated Field Worker (not administrator)
+        WORKER_MOBILE = "+919123456789"
+        WORKER_CODE = "EMP-91234"
+        stmt_worker_user = select(User).where(User.mobile_id == WORKER_MOBILE)
+        worker_user = (await session.execute(stmt_worker_user)).scalars().first()
+        if not worker_user:
+            worker_user = User(
+                id=uuid.uuid4(),
+                mobile_id=WORKER_MOBILE,
+                role="employee",
+                is_active=True,
+            )
+            session.add(worker_user)
+            await session.flush()
+
+        stmt_emp = select(Employee).where(Employee.user_id == worker_user.id)
         res_emp = await session.execute(stmt_emp)
         emp = res_emp.scalars().first()
 
         if not emp:
-            # Fallback to any employee who is a worker
-            stmt_fallback = select(Employee).limit(1)
-            res_fallback = await session.execute(stmt_fallback)
-            emp = res_fallback.scalars().first()
-            if not emp:
-                raise RuntimeError("No employee found in dev database to attach test data to.")
+            emp = Employee(
+                id=uuid.uuid4(),
+                user_id=worker_user.id,
+                employee_code=WORKER_CODE,
+                mobile_id=WORKER_MOBILE,
+                name="Field Test Worker",
+                is_active=True,
+            )
+            session.add(emp)
+            await session.flush()
 
-        print(f"[OK] Target Employee: {emp.name} (Code: {emp.employee_code}, Mobile: {emp.mobile_id}, ID: {emp.id})")
+        print(f"[OK] Target Field Employee: {emp.name} (Code: {emp.employee_code}, Mobile: {emp.mobile_id}, ID: {emp.id})")
 
         # 2. Locate Site
         # Check if employee has an existing site assignment
