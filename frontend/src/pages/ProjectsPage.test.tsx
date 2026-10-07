@@ -15,6 +15,7 @@ vi.mock('../api/masterData', async (importOriginal) => {
     getClientsApi: vi.fn(),
     createProjectApi: vi.fn(),
     deleteProjectApi: vi.fn(),
+    updateProjectApi: vi.fn(),
   };
 });
 
@@ -134,7 +135,51 @@ describe('ProjectsPage', () => {
     });
   });
 
-  it('hides delete button when viewed by non-administrator role', async () => {
+  it('allows administrator to edit an existing project', async () => {
+    vi.mocked(masterDataApi.getClientsApi).mockResolvedValue(mockClients);
+    vi.mocked(masterDataApi.getProjectsApi).mockResolvedValue(mockProjects);
+    vi.mocked(masterDataApi.updateProjectApi).mockResolvedValue({
+      ...mockProjects[0],
+      name: 'Metro Line Extension Phase 2',
+      status: 'Completed',
+    });
+
+    renderProjectsPage('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('edit-project-proj-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('edit-project-proj-1'));
+
+    expect(screen.getByText('Edit Project')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Metro Line Extension')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('project-name-input'), {
+      target: { value: 'Metro Line Extension Phase 2' },
+    });
+    fireEvent.change(screen.getByTestId('project-status-select'), {
+      target: { value: 'Completed' },
+    });
+
+    fireEvent.click(screen.getByTestId('save-project-btn'));
+
+    await waitFor(() => {
+      expect(masterDataApi.updateProjectApi).toHaveBeenCalledWith('proj-1', {
+        name: 'Metro Line Extension Phase 2',
+        client_id: 'client-1',
+        status: 'Completed',
+        start_date: '2026-01-01',
+        end_date: '2026-12-31',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Project "Metro Line Extension Phase 2" updated successfully!/i)).toBeInTheDocument();
+    });
+  });
+
+  it('hides edit and delete buttons when viewed by non-administrator role', async () => {
     vi.mocked(masterDataApi.getClientsApi).mockResolvedValue(mockClients);
     vi.mocked(masterDataApi.getProjectsApi).mockResolvedValue(mockProjects);
 
@@ -144,6 +189,7 @@ describe('ProjectsPage', () => {
       expect(screen.getByText('Metro Line Extension')).toBeInTheDocument();
     });
 
+    expect(screen.queryByTestId('edit-project-proj-1')).not.toBeInTheDocument();
     expect(screen.queryByTestId('delete-project-proj-1')).not.toBeInTheDocument();
   });
 });

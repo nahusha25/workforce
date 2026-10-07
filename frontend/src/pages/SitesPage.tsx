@@ -4,6 +4,7 @@ import {
   deleteSiteApi,
   getProjectsApi,
   getSitesApi,
+  updateSiteApi,
   type ProjectResponseData,
   type SiteResponseData,
 } from '../api/masterData';
@@ -34,12 +35,14 @@ export const SitesPage: React.FC = () => {
 
   // Form state
   const [showForm, setShowForm] = useState<boolean>(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [name, setName] = useState<string>('');
   const [projectId, setProjectId] = useState<string>('');
   const [address, setAddress] = useState<string>('');
   const [location, setLocation] = useState<string>('');
   const [permittedRadiusM, setPermittedRadiusM] = useState<string>('100');
+  const [isActive, setIsActive] = useState<boolean>(true);
   const [formError, setFormError] = useState<string | null>(null);
 
   const fetchData = async () => {
@@ -62,7 +65,40 @@ export const SitesPage: React.FC = () => {
     fetchData();
   }, []);
 
-  const handleCreateSite = async (e: React.FormEvent) => {
+  const resetForm = () => {
+    setName('');
+    setAddress('');
+    setLocation('');
+    setPermittedRadiusM('100');
+    setIsActive(true);
+    if (projects.length > 0) {
+      setProjectId(projects[0].id);
+    }
+    setEditingId(null);
+    setFormError(null);
+    setShowForm(false);
+  };
+
+  const handleStartCreate = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const handleStartEdit = (site: SiteResponseData) => {
+    setFormError(null);
+    setSuccessMsg(null);
+    setEditingId(site.id);
+    setName(site.name);
+    setProjectId(site.project_id);
+    setAddress(site.address || '');
+    setLocation(site.location || '');
+    setPermittedRadiusM(site.permitted_radius_m !== null && site.permitted_radius_m !== undefined ? String(site.permitted_radius_m) : '100');
+    setIsActive(site.is_active);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSaveSite = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     setSuccessMsg(null);
@@ -85,24 +121,32 @@ export const SitesPage: React.FC = () => {
 
     setSubmitting(true);
     try {
-      await createSiteApi({
-        name: name.trim(),
-        project_id: projectId,
-        address: address.trim() || undefined,
-        location: location.trim() || undefined,
-        permitted_radius_m: radiusVal,
-        is_active: true,
-      });
+      if (editingId) {
+        await updateSiteApi(editingId, {
+          name: name.trim(),
+          project_id: projectId,
+          address: address.trim() || null,
+          location: location.trim() || null,
+          permitted_radius_m: radiusVal,
+          is_active: isActive,
+        });
+        setSuccessMsg(`Site "${name.trim()}" updated successfully!`);
+      } else {
+        await createSiteApi({
+          name: name.trim(),
+          project_id: projectId,
+          address: address.trim() || undefined,
+          location: location.trim() || undefined,
+          permitted_radius_m: radiusVal,
+          is_active: true,
+        });
+        setSuccessMsg(`Site "${name.trim()}" created successfully!`);
+      }
 
-      setSuccessMsg(`Site "${name.trim()}" created successfully!`);
-      setName('');
-      setAddress('');
-      setLocation('');
-      setPermittedRadiusM('100');
-      setShowForm(false);
+      resetForm();
       await fetchData();
     } catch (err: any) {
-      setFormError(err.message || 'Failed to create site');
+      setFormError(err.response?.data?.detail || err.message || (editingId ? 'Failed to update site' : 'Failed to create site'));
     } finally {
       setSubmitting(false);
     }
@@ -140,7 +184,7 @@ export const SitesPage: React.FC = () => {
           </p>
         </div>
         {isAdmin && (
-          <Button onClick={() => setShowForm(!showForm)}>
+          <Button onClick={showForm ? resetForm : handleStartCreate} data-testid="add-site-btn">
             {showForm ? 'Cancel' : '+ Add Site'}
           </Button>
         )}
@@ -157,15 +201,19 @@ export const SitesPage: React.FC = () => {
       {error && <ErrorMessage title="Failed to Load Data" message={error} onRetry={fetchData} />}
 
       {showForm && (
-        <Card title="Register New Construction Site" subtitle="Fill in site details according to master schema">
+        <Card
+          title={editingId ? 'Edit Construction Site' : 'Register New Construction Site'}
+          subtitle={editingId ? 'Update existing site details' : 'Fill in site details according to master schema'}
+        >
           {formError && <ErrorMessage message={formError} />}
-          <form onSubmit={handleCreateSite} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <form onSubmit={handleSaveSite} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <Select
               label="Select Project *"
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
               options={projects.map((p) => ({ value: p.id, label: p.name }))}
               required
+              data-testid="site-project-select"
             />
             <Input
               label="Site Name *"
@@ -173,18 +221,21 @@ export const SitesPage: React.FC = () => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
+              data-testid="site-name-input"
             />
             <Input
               label="Site Address"
               placeholder="e.g. Sector 62, MG Road, Bengaluru"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
+              data-testid="site-address-input"
             />
             <Input
               label="Location (GPS / Address)"
               placeholder="e.g. 12.9716, 77.5946"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
+              data-testid="site-location-input"
             />
             <Input
               label="Permitted Radius (meters)"
@@ -194,13 +245,28 @@ export const SitesPage: React.FC = () => {
               value={permittedRadiusM}
               onChange={(e) => setPermittedRadiusM(e.target.value)}
               inputMode="numeric"
+              data-testid="site-radius-input"
             />
+            {editingId && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: 'var(--font-size-sm)' }}>
+                <input
+                  type="checkbox"
+                  id="site-active-toggle"
+                  checked={isActive}
+                  onChange={(e) => setIsActive(e.target.checked)}
+                  data-testid="site-active-checkbox"
+                />
+                <label htmlFor="site-active-toggle" style={{ fontWeight: 500, cursor: 'pointer' }}>
+                  Active Site
+                </label>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' }}>
-              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+              <Button type="button" variant="outline" onClick={resetForm}>
                 Cancel
               </Button>
-              <Button type="submit" isLoading={submitting}>
-                Save Site
+              <Button type="submit" isLoading={submitting} data-testid="save-site-btn">
+                {editingId ? 'Update Site' : 'Save Site'}
               </Button>
             </div>
           </form>
@@ -238,7 +304,15 @@ export const SitesPage: React.FC = () => {
                   </div>
                 )}
                 {isAdmin && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-neutral-200)' }}>
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-neutral-200)' }}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleStartEdit(site)}
+                      data-testid={`edit-site-${site.id}`}
+                    >
+                      Edit
+                    </Button>
                     <Button
                       size="sm"
                       variant="danger"

@@ -44,6 +44,12 @@ class MasterDataRepository:
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
+    async def update_client(self, client: Client) -> Client:
+        self.db.add(client)
+        await self.db.commit()
+        await self.db.refresh(client)
+        return client
+
     # Projects
     async def create_project(self, project: Project) -> Project:
         self.db.add(project)
@@ -61,6 +67,12 @@ class MasterDataRepository:
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
+    async def update_project(self, project: Project) -> Project:
+        self.db.add(project)
+        await self.db.commit()
+        await self.db.refresh(project)
+        return project
+
     # Sites
     async def create_site(self, site: Site) -> Site:
         self.db.add(site)
@@ -77,6 +89,12 @@ class MasterDataRepository:
         stmt = select(Site).offset(skip).limit(limit)
         result = await self.db.execute(stmt)
         return result.scalars().all()
+
+    async def update_site(self, site: Site) -> Site:
+        self.db.add(site)
+        await self.db.commit()
+        await self.db.refresh(site)
+        return site
 
     # Roles
     async def get_roles(self, skip: int = 0, limit: int = 100) -> Sequence[Role]:

@@ -4,6 +4,7 @@ import { getAllEmployeesApi, deleteEmployeeApi, type EmployeeResponseData } from
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { ConfirmDeleteModal } from '../components/ui/ConfirmDeleteModal';
+import { EditEmployeeModal } from '../components/employee/EditEmployeeModal';
 import { ErrorMessage } from '../components/ui/ErrorMessage';
 import { Input } from '../components/ui/Input';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
@@ -23,7 +24,8 @@ export const EmployeesPage: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Deletion state
+  // Edit & Deletion state
+  const [editTarget, setEditTarget] = useState<EmployeeResponseData | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<EmployeeResponseData | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
@@ -297,17 +299,30 @@ export const EmployeesPage: React.FC = () => {
                   </td>
                   {isAdmin && (
                     <td style={{ textAlign: 'right' }}>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => {
-                          setDeleteError(null);
-                          setDeleteTarget(emp);
-                        }}
-                        data-testid={`delete-emp-${emp.id}`}
-                      >
-                        Delete
-                      </Button>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setDeleteError(null);
+                            setEditTarget(emp);
+                          }}
+                          data-testid={`edit-emp-${emp.id}`}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => {
+                            setDeleteError(null);
+                            setDeleteTarget(emp);
+                          }}
+                          data-testid={`delete-emp-${emp.id}`}
+                        >
+                          Delete
+                        </Button>
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -316,6 +331,18 @@ export const EmployeesPage: React.FC = () => {
           </table>
         </div>
       )}
+
+      {/* Edit Employee Modal */}
+      <EditEmployeeModal
+        isOpen={!!editTarget}
+        employee={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSaved={(updated) => {
+          setSuccessMsg(`Employee "${updated.name}" (${updated.employee_code}) was updated successfully.`);
+          setEditTarget(null);
+          fetchEmployees();
+        }}
+      />
 
       {/* Confirmation Modal */}
       <ConfirmDeleteModal

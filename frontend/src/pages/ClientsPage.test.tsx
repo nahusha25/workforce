@@ -14,6 +14,7 @@ vi.mock('../api/masterData', async (importOriginal) => {
     getClientsApi: vi.fn(),
     createClientApi: vi.fn(),
     deleteClientApi: vi.fn(),
+    updateClientApi: vi.fn(),
   };
 });
 
@@ -127,7 +128,46 @@ describe('ClientsPage', () => {
     });
   });
 
-  it('hides delete button when viewed by non-administrator role', async () => {
+  it('allows administrator to edit an existing client', async () => {
+    vi.mocked(masterDataApi.getClientsApi).mockResolvedValue(mockClients);
+    vi.mocked(masterDataApi.updateClientApi).mockResolvedValue({
+      ...mockClients[0],
+      name: 'Acme Infra Corp Updated',
+    });
+
+    renderClientsPage('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('edit-client-client-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('edit-client-client-1'));
+
+    expect(screen.getByText('Edit Client')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Acme Infra Corp')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Alice Smith')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('client-name-input'), {
+      target: { value: 'Acme Infra Corp Updated' },
+    });
+
+    fireEvent.click(screen.getByTestId('save-client-btn'));
+
+    await waitFor(() => {
+      expect(masterDataApi.updateClientApi).toHaveBeenCalledWith('client-1', {
+        name: 'Acme Infra Corp Updated',
+        contact_person: 'Alice Smith',
+        contact_mobile: '+919876543210',
+        is_active: true,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Client "Acme Infra Corp Updated" updated successfully!/i)).toBeInTheDocument();
+    });
+  });
+
+  it('hides edit and delete buttons when viewed by non-administrator role', async () => {
     vi.mocked(masterDataApi.getClientsApi).mockResolvedValue(mockClients);
 
     renderClientsPage('director');
@@ -136,6 +176,7 @@ describe('ClientsPage', () => {
       expect(screen.getByText('Acme Infra Corp')).toBeInTheDocument();
     });
 
+    expect(screen.queryByTestId('edit-client-client-1')).not.toBeInTheDocument();
     expect(screen.queryByTestId('delete-client-client-1')).not.toBeInTheDocument();
   });
 });

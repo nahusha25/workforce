@@ -15,6 +15,7 @@ vi.mock('../api/masterData', async (importOriginal) => {
     getProjectsApi: vi.fn(),
     createSiteApi: vi.fn(),
     deleteSiteApi: vi.fn(),
+    updateSiteApi: vi.fn(),
   };
 });
 
@@ -136,7 +137,52 @@ describe('SitesPage', () => {
     });
   });
 
-  it('hides delete button when viewed by non-administrator role', async () => {
+  it('allows administrator to edit an existing site', async () => {
+    vi.mocked(masterDataApi.getProjectsApi).mockResolvedValue(mockProjects);
+    vi.mocked(masterDataApi.getSitesApi).mockResolvedValue(mockSites);
+    vi.mocked(masterDataApi.updateSiteApi).mockResolvedValue({
+      ...mockSites[0],
+      name: 'Central Junction Site Enhanced',
+      permitted_radius_m: 150,
+    });
+
+    renderSitesPage('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('edit-site-site-1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('edit-site-site-1'));
+
+    expect(screen.getByText('Edit Construction Site')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Central Junction Site')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('site-name-input'), {
+      target: { value: 'Central Junction Site Enhanced' },
+    });
+    fireEvent.change(screen.getByTestId('site-radius-input'), {
+      target: { value: '150' },
+    });
+
+    fireEvent.click(screen.getByTestId('save-site-btn'));
+
+    await waitFor(() => {
+      expect(masterDataApi.updateSiteApi).toHaveBeenCalledWith('site-1', {
+        name: 'Central Junction Site Enhanced',
+        project_id: 'proj-1',
+        address: '123 Main Street',
+        location: null,
+        permitted_radius_m: 150,
+        is_active: true,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Site "Central Junction Site Enhanced" updated successfully!/i)).toBeInTheDocument();
+    });
+  });
+
+  it('hides edit and delete buttons when viewed by non-administrator role', async () => {
     vi.mocked(masterDataApi.getProjectsApi).mockResolvedValue(mockProjects);
     vi.mocked(masterDataApi.getSitesApi).mockResolvedValue(mockSites);
 
@@ -146,6 +192,7 @@ describe('SitesPage', () => {
       expect(screen.getByText('Central Junction Site')).toBeInTheDocument();
     });
 
+    expect(screen.queryByTestId('edit-site-site-1')).not.toBeInTheDocument();
     expect(screen.queryByTestId('delete-site-site-1')).not.toBeInTheDocument();
   });
 });

@@ -166,6 +166,43 @@ class EmployeeRepository:
         await self.db.refresh(assignment)
         return assignment
 
+    async def update_user(self, user: User) -> User:
+        user.updated_at = datetime.now(timezone.utc)
+        self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def set_employee_site_assignments(
+        self, employee_id: uuid.UUID, site_ids: list[uuid.UUID]
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        stmt = select(EmployeeSiteAssignment).where(
+            EmployeeSiteAssignment.employee_id == employee_id,
+            EmployeeSiteAssignment.is_active.is_(True),
+        )
+        res = await self.db.execute(stmt)
+        current_assignments = res.scalars().all()
+        current_site_ids = {a.site_id for a in current_assignments}
+
+        for a in current_assignments:
+            if a.site_id not in site_ids:
+                a.is_active = False
+                a.unassigned_at = now
+                self.db.add(a)
+
+        for sid in site_ids:
+            if sid not in current_site_ids:
+                new_assign = EmployeeSiteAssignment(
+                    employee_id=employee_id,
+                    site_id=sid,
+                    assigned_at=now,
+                    is_active=True,
+                )
+                self.db.add(new_assign)
+
+        await self.db.commit()
+
     async def delete_employee_atomic(self, employee_id: uuid.UUID, user_id: uuid.UUID) -> None:
         from sqlalchemy import delete, select, update
         from app.models.auth import OtpToken, RefreshToken, User

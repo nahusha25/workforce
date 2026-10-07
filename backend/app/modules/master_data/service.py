@@ -9,10 +9,13 @@ from app.modules.master_data.schemas import (
     ActivityCreate,
     ActivityUpdate,
     ClientCreate,
+    ClientUpdate,
     MaterialCreate,
     MaterialUpdate,
     ProjectCreate,
+    ProjectUpdate,
     SiteCreate,
+    SiteUpdate,
     WorkOrderCreate,
     WorkOrderUpdate,
 )
@@ -31,6 +34,21 @@ class MasterDataService:
         )
         return await self.repo.create_client(client)
 
+    async def get_client(self, client_id: uuid.UUID) -> Client:
+        client = await self.repo.get_client_by_id(client_id)
+        if not client:
+            raise NotFoundError(f"Client with id {client_id} not found")
+        return client
+
+    async def update_client(self, client_id: uuid.UUID, client_in: ClientUpdate) -> Client:
+        client = await self.repo.get_client_by_id(client_id)
+        if not client:
+            raise NotFoundError(f"Client with id {client_id} not found")
+        update_data = client_in.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(client, field, value)
+        return await self.repo.update_client(client)
+
     async def get_clients(self, skip: int = 0, limit: int = 100) -> Sequence[Client]:
         return await self.repo.get_clients(skip=skip, limit=limit)
 
@@ -47,6 +65,25 @@ class MasterDataService:
             client_id=project_in.client_id
         )
         return await self.repo.create_project(project)
+
+    async def get_project(self, project_id: uuid.UUID) -> Project:
+        project = await self.repo.get_project_by_id(project_id)
+        if not project:
+            raise NotFoundError(f"Project with id {project_id} not found")
+        return project
+
+    async def update_project(self, project_id: uuid.UUID, project_in: ProjectUpdate) -> Project:
+        project = await self.repo.get_project_by_id(project_id)
+        if not project:
+            raise NotFoundError(f"Project with id {project_id} not found")
+        update_data = project_in.model_dump(exclude_unset=True)
+        if "client_id" in update_data and update_data["client_id"] is not None:
+            client = await self.repo.get_client_by_id(update_data["client_id"])
+            if not client:
+                raise NotFoundError(f"Client with id {update_data['client_id']} not found")
+        for field, value in update_data.items():
+            setattr(project, field, value)
+        return await self.repo.update_project(project)
 
     async def get_projects(self, skip: int = 0, limit: int = 100) -> Sequence[Project]:
         return await self.repo.get_projects(skip=skip, limit=limit)
@@ -66,6 +103,25 @@ class MasterDataService:
             is_active=site_in.is_active
         )
         return await self.repo.create_site(site)
+
+    async def get_site(self, site_id: uuid.UUID) -> Site:
+        site = await self.repo.get_site_by_id(site_id)
+        if not site:
+            raise NotFoundError(f"Site with id {site_id} not found")
+        return site
+
+    async def update_site(self, site_id: uuid.UUID, site_in: SiteUpdate) -> Site:
+        site = await self.repo.get_site_by_id(site_id)
+        if not site:
+            raise NotFoundError(f"Site with id {site_id} not found")
+        update_data = site_in.model_dump(exclude_unset=True)
+        if "project_id" in update_data and update_data["project_id"] is not None:
+            project = await self.repo.get_project_by_id(update_data["project_id"])
+            if not project:
+                raise NotFoundError(f"Project with id {update_data['project_id']} not found")
+        for field, value in update_data.items():
+            setattr(site, field, value)
+        return await self.repo.update_site(site)
 
     async def get_sites(self, skip: int = 0, limit: int = 100) -> Sequence[Site]:
         return await self.repo.get_sites(skip=skip, limit=limit)

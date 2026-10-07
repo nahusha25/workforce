@@ -18,11 +18,14 @@ class EmployeeCreate(BaseModel):
 
 class EmployeeUpdate(BaseModel):
     name: str | None = Field(None, min_length=2, max_length=200)
+    mobile_number: str | None = Field(None, min_length=8, max_length=20)
+    system_role: str | None = Field(None, max_length=50)
     supervisor_id: uuid.UUID | None = None
     is_active: bool | None = None
     rate_type: str | None = Field(None, max_length=50)
     rate_amount: float | None = Field(None, ge=0)
     trade_role_ids: list[uuid.UUID] | None = None
+    site_ids: list[uuid.UUID] | None = None
 
 
 class SiteAssignmentCreate(BaseModel):

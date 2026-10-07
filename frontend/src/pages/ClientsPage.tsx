@@ -1,5 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { createClientApi, deleteClientApi, getClientsApi, type ClientResponseData } from '../api/masterData';
+import {
+  createClientApi,
+  deleteClientApi,
+  getClientsApi,
+  updateClientApi,
+  type ClientResponseData,
+} from '../api/masterData';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { ConfirmDeleteModal } from '../components/ui/ConfirmDeleteModal';
@@ -25,10 +31,12 @@ export const ClientsPage: React.FC = () => {
 
   // Form state
   const [showForm, setShowForm] = useState<boolean>(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [name, setName] = useState<string>('');
   const [contactPerson, setContactPerson] = useState<string>('');
   const [contactMobile, setContactMobile] = useState<string>('');
+  const [isActive, setIsActive] = useState<boolean>(true);
   const [formError, setFormError] = useState<string | null>(null);
 
   const fetchClients = async () => {
@@ -47,7 +55,34 @@ export const ClientsPage: React.FC = () => {
     fetchClients();
   }, []);
 
-  const handleCreateClient = async (e: React.FormEvent) => {
+  const resetForm = () => {
+    setName('');
+    setContactPerson('');
+    setContactMobile('');
+    setIsActive(true);
+    setEditingId(null);
+    setFormError(null);
+    setShowForm(false);
+  };
+
+  const handleStartCreate = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const handleStartEdit = (client: ClientResponseData) => {
+    setFormError(null);
+    setSuccessMsg(null);
+    setEditingId(client.id);
+    setName(client.name);
+    setContactPerson(client.contact_person || '');
+    setContactMobile(client.contact_mobile || '');
+    setIsActive(client.is_active);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSaveClient = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     setSuccessMsg(null);
@@ -59,21 +94,28 @@ export const ClientsPage: React.FC = () => {
 
     setSubmitting(true);
     try {
-      await createClientApi({
-        name: name.trim(),
-        contact_person: contactPerson.trim() || undefined,
-        contact_mobile: contactMobile.trim() || undefined,
-        is_active: true,
-      });
+      if (editingId) {
+        await updateClientApi(editingId, {
+          name: name.trim(),
+          contact_person: contactPerson.trim() || null,
+          contact_mobile: contactMobile.trim() || null,
+          is_active: isActive,
+        });
+        setSuccessMsg(`Client "${name.trim()}" updated successfully!`);
+      } else {
+        await createClientApi({
+          name: name.trim(),
+          contact_person: contactPerson.trim() || undefined,
+          contact_mobile: contactMobile.trim() || undefined,
+          is_active: true,
+        });
+        setSuccessMsg(`Client "${name.trim()}" created successfully!`);
+      }
 
-      setSuccessMsg(`Client "${name.trim()}" created successfully!`);
-      setName('');
-      setContactPerson('');
-      setContactMobile('');
-      setShowForm(false);
+      resetForm();
       await fetchClients();
     } catch (err: any) {
-      setFormError(err.message || 'Failed to create client');
+      setFormError(err.response?.data?.detail || err.message || (editingId ? 'Failed to update client' : 'Failed to create client'));
     } finally {
       setSubmitting(false);
     }
@@ -106,7 +148,7 @@ export const ClientsPage: React.FC = () => {
           </p>
         </div>
         {isAdmin && (
-          <Button onClick={() => setShowForm(!showForm)}>
+          <Button onClick={showForm ? resetForm : handleStartCreate} data-testid="add-client-btn">
             {showForm ? 'Cancel' : '+ Add Client'}
           </Button>
         )}
@@ -123,21 +165,26 @@ export const ClientsPage: React.FC = () => {
       {error && <ErrorMessage title="Failed to Load Data" message={error} onRetry={fetchClients} />}
 
       {showForm && (
-        <Card title="Register New Client" subtitle="Fill in client details according to master schema">
+        <Card
+          title={editingId ? 'Edit Client' : 'Register New Client'}
+          subtitle={editingId ? 'Update existing client details' : 'Fill in client details according to master schema'}
+        >
           {formError && <ErrorMessage message={formError} />}
-          <form onSubmit={handleCreateClient} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <form onSubmit={handleSaveClient} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <Input
               label="Client Name *"
               placeholder="e.g. Acme Construction Corp"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
+              data-testid="client-name-input"
             />
             <Input
               label="Contact Person"
               placeholder="e.g. Jane Doe"
               value={contactPerson}
               onChange={(e) => setContactPerson(e.target.value)}
+              data-testid="client-contact-person-input"
             />
             <Input
               label="Contact Mobile"
@@ -145,13 +192,28 @@ export const ClientsPage: React.FC = () => {
               value={contactMobile}
               onChange={(e) => setContactMobile(e.target.value)}
               inputMode="tel"
+              data-testid="client-contact-mobile-input"
             />
+            {editingId && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: 'var(--font-size-sm)' }}>
+                <input
+                  type="checkbox"
+                  id="client-active-toggle"
+                  checked={isActive}
+                  onChange={(e) => setIsActive(e.target.checked)}
+                  data-testid="client-active-checkbox"
+                />
+                <label htmlFor="client-active-toggle" style={{ fontWeight: 500, cursor: 'pointer' }}>
+                  Active Client
+                </label>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' }}>
-              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+              <Button type="button" variant="outline" onClick={resetForm}>
                 Cancel
               </Button>
-              <Button type="submit" isLoading={submitting}>
-                Save Client
+              <Button type="submit" isLoading={submitting} data-testid="save-client-btn">
+                {editingId ? 'Update Client' : 'Save Client'}
               </Button>
             </div>
           </form>
@@ -189,7 +251,15 @@ export const ClientsPage: React.FC = () => {
                   Registered on: {new Date(client.created_at).toLocaleDateString()}
                 </div>
                 {isAdmin && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-neutral-200)' }}>
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-neutral-200)' }}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleStartEdit(client)}
+                      data-testid={`edit-client-${client.id}`}
+                    >
+                      Edit
+                    </Button>
                     <Button
                       size="sm"
                       variant="danger"

@@ -167,20 +167,53 @@ class EmployeeService:
         if emp_update.name is not None:
             employee.name = emp_update.name
 
-        if emp_update.supervisor_id is not None:
-            supervisor = await self.repo.get_employee_by_id(emp_update.supervisor_id)
-            if not supervisor or not supervisor.is_active:
-                raise NotFoundError(f"Active supervisor with ID {emp_update.supervisor_id} not found")
-            employee.supervisor_id = emp_update.supervisor_id
+        if emp_update.mobile_number is not None:
+            clean_mobile = emp_update.mobile_number.strip()
+            existing_user = await self.repo.get_user_by_mobile(clean_mobile)
+            if existing_user and existing_user.id != employee.user_id:
+                raise ConflictError(f"User with mobile number {clean_mobile} already exists")
+            existing_emp = await self.repo.get_employee_by_mobile(clean_mobile)
+            if existing_emp and existing_emp.id != employee.id:
+                raise ConflictError(f"Employee with mobile number {clean_mobile} already exists")
+            employee.mobile_id = clean_mobile
+            user = await self.repo.get_user_by_id(employee.user_id)
+            if user:
+                user.mobile_id = clean_mobile
+                await self.repo.update_user(user)
+
+        if emp_update.system_role is not None:
+            user = await self.repo.get_user_by_id(employee.user_id)
+            if user:
+                user.role = emp_update.system_role
+                await self.repo.update_user(user)
+
+        if "supervisor_id" in emp_update.model_fields_set:
+            if emp_update.supervisor_id is not None:
+                supervisor = await self.repo.get_employee_by_id(emp_update.supervisor_id)
+                if not supervisor or not supervisor.is_active:
+                    raise NotFoundError(f"Active supervisor with ID {emp_update.supervisor_id} not found")
+                employee.supervisor_id = emp_update.supervisor_id
+            else:
+                employee.supervisor_id = None
 
         if emp_update.is_active is not None:
             employee.is_active = emp_update.is_active
+            user = await self.repo.get_user_by_id(employee.user_id)
+            if user:
+                user.is_active = emp_update.is_active
+                await self.repo.update_user(user)
 
         if emp_update.trade_role_ids is not None:
             roles = await self.repo.get_roles_by_ids(emp_update.trade_role_ids)
             if len(roles) != len(set(emp_update.trade_role_ids)):
                 raise NotFoundError("One or more specified trade roles do not exist")
             await self.repo.set_employee_trade_roles(employee.id, emp_update.trade_role_ids)
+
+        if emp_update.site_ids is not None:
+            sites = await self.repo.get_sites_by_ids(emp_update.site_ids)
+            if len(sites) != len(set(emp_update.site_ids)):
+                raise NotFoundError("One or more specified sites do not exist")
+            await self.repo.set_employee_site_assignments(employee.id, emp_update.site_ids)
 
         if emp_update.rate_type is not None or emp_update.rate_amount is not None:
             current_rate = await self.repo.get_active_rate_history(employee.id)

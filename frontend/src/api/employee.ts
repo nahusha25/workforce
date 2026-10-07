@@ -63,8 +63,28 @@ export async function getAllEmployeesApi(pageSize: number = 100): Promise<Employ
   return allEmployees;
 }
 
+export interface EmployeeUpdateData {
+  name?: string;
+  mobile_number?: string;
+  system_role?: SystemRole;
+  trade_role_ids?: string[];
+  rate_type?: string;
+  rate_amount?: number;
+  supervisor_id?: string | null;
+  site_ids?: string[];
+  is_active?: boolean;
+}
+
 export async function deleteEmployeeApi(id: string): Promise<{ status: string; message: string }> {
   const res = await apiClient.delete<{ status: string; message: string }>(`/employees/${id}`);
+  return res.data;
+}
+
+export async function updateEmployeeApi(
+  id: string,
+  data: EmployeeUpdateData
+): Promise<EmployeeResponseData> {
+  const res = await apiClient.put<EmployeeResponseData>(`/employees/${id}`, data);
   return res.data;
 }
 

@@ -22,6 +22,12 @@ class ClientResponse(ClientBase):
     class Config:
         from_attributes = True
 
+class ClientUpdate(BaseModel):
+    name: str | None = Field(None, min_length=2, max_length=200)
+    contact_person: str | None = Field(None, max_length=200)
+    contact_mobile: str | None = Field(None, max_length=20)
+    is_active: bool | None = None
+
 # Projects
 class ProjectBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=200)
@@ -32,6 +38,13 @@ class ProjectBase(BaseModel):
 
 class ProjectCreate(ProjectBase):
     pass
+
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(None, min_length=2, max_length=200)
+    status: str | None = Field(None, max_length=50)
+    start_date: date | None = None
+    end_date: date | None = None
+    client_id: uuid.UUID | None = None
 
 class ProjectResponse(ProjectBase):
     id: uuid.UUID
@@ -51,6 +64,15 @@ class SiteBase(BaseModel):
 
 class SiteCreate(SiteBase):
     pass
+
+class SiteUpdate(BaseModel):
+    name: str | None = Field(None, min_length=2, max_length=200)
+    address: str | None = None
+    location: str | None = None
+    permitted_radius_m: float | None = Field(None, ge=0)
+    supervisor_id: uuid.UUID | None = None
+    is_active: bool | None = None
+    project_id: uuid.UUID | None = None
 
 class SiteResponse(SiteBase):
     id: uuid.UUID

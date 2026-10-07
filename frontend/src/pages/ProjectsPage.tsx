@@ -4,6 +4,7 @@ import {
   deleteProjectApi,
   getClientsApi,
   getProjectsApi,
+  updateProjectApi,
   type ClientResponseData,
   type ProjectResponseData,
 } from '../api/masterData';
@@ -34,6 +35,7 @@ export const ProjectsPage: React.FC = () => {
 
   // Form state
   const [showForm, setShowForm] = useState<boolean>(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [name, setName] = useState<string>('');
   const [clientId, setClientId] = useState<string>('');
@@ -62,7 +64,38 @@ export const ProjectsPage: React.FC = () => {
     fetchData();
   }, []);
 
-  const handleCreateProject = async (e: React.FormEvent) => {
+  const resetForm = () => {
+    setName('');
+    setStartDate('');
+    setEndDate('');
+    setStatus('Active');
+    if (clients.length > 0) {
+      setClientId(clients[0].id);
+    }
+    setEditingId(null);
+    setFormError(null);
+    setShowForm(false);
+  };
+
+  const handleStartCreate = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const handleStartEdit = (project: ProjectResponseData) => {
+    setFormError(null);
+    setSuccessMsg(null);
+    setEditingId(project.id);
+    setName(project.name);
+    setClientId(project.client_id);
+    setStatus(project.status);
+    setStartDate(project.start_date || '');
+    setEndDate(project.end_date || '');
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSaveProject = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     setSuccessMsg(null);
@@ -79,22 +112,30 @@ export const ProjectsPage: React.FC = () => {
 
     setSubmitting(true);
     try {
-      await createProjectApi({
-        name: name.trim(),
-        client_id: clientId,
-        status: status.trim() || 'Active',
-        start_date: startDate || undefined,
-        end_date: endDate || undefined,
-      });
+      if (editingId) {
+        await updateProjectApi(editingId, {
+          name: name.trim(),
+          client_id: clientId,
+          status: status.trim() || 'Active',
+          start_date: startDate || null,
+          end_date: endDate || null,
+        });
+        setSuccessMsg(`Project "${name.trim()}" updated successfully!`);
+      } else {
+        await createProjectApi({
+          name: name.trim(),
+          client_id: clientId,
+          status: status.trim() || 'Active',
+          start_date: startDate || undefined,
+          end_date: endDate || undefined,
+        });
+        setSuccessMsg(`Project "${name.trim()}" created successfully!`);
+      }
 
-      setSuccessMsg(`Project "${name.trim()}" created successfully!`);
-      setName('');
-      setStartDate('');
-      setEndDate('');
-      setShowForm(false);
+      resetForm();
       await fetchData();
     } catch (err: any) {
-      setFormError(err.message || 'Failed to create project');
+      setFormError(err.response?.data?.detail || err.message || (editingId ? 'Failed to update project' : 'Failed to create project'));
     } finally {
       setSubmitting(false);
     }
@@ -132,7 +173,7 @@ export const ProjectsPage: React.FC = () => {
           </p>
         </div>
         {isAdmin && (
-          <Button onClick={() => setShowForm(!showForm)}>
+          <Button onClick={showForm ? resetForm : handleStartCreate} data-testid="add-project-btn">
             {showForm ? 'Cancel' : '+ Add Project'}
           </Button>
         )}
@@ -149,15 +190,19 @@ export const ProjectsPage: React.FC = () => {
       {error && <ErrorMessage title="Failed to Load Data" message={error} onRetry={fetchData} />}
 
       {showForm && (
-        <Card title="Register New Project" subtitle="Fill in project details according to master schema">
+        <Card
+          title={editingId ? 'Edit Project' : 'Register New Project'}
+          subtitle={editingId ? 'Update existing project details' : 'Fill in project details according to master schema'}
+        >
           {formError && <ErrorMessage message={formError} />}
-          <form onSubmit={handleCreateProject} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <form onSubmit={handleSaveProject} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <Select
               label="Select Client *"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
               options={clients.map((c) => ({ value: c.id, label: c.name }))}
               required
+              data-testid="project-client-select"
             />
             <Input
               label="Project Name *"
@@ -165,6 +210,7 @@ export const ProjectsPage: React.FC = () => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
+              data-testid="project-name-input"
             />
             <Select
               label="Status *"
@@ -177,6 +223,7 @@ export const ProjectsPage: React.FC = () => {
                 { value: 'On Hold', label: 'On Hold' },
               ]}
               required
+              data-testid="project-status-select"
             />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <Input
@@ -184,20 +231,22 @@ export const ProjectsPage: React.FC = () => {
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
+                data-testid="project-start-date-input"
               />
               <Input
                 label="End Date"
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
+                data-testid="project-end-date-input"
               />
             </div>
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' }}>
-              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+              <Button type="button" variant="outline" onClick={resetForm}>
                 Cancel
               </Button>
-              <Button type="submit" isLoading={submitting}>
-                Save Project
+              <Button type="submit" isLoading={submitting} data-testid="save-project-btn">
+                {editingId ? 'Update Project' : 'Save Project'}
               </Button>
             </div>
           </form>
@@ -238,7 +287,15 @@ export const ProjectsPage: React.FC = () => {
                   </div>
                 )}
                 {isAdmin && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-neutral-200)' }}>
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-neutral-200)' }}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleStartEdit(project)}
+                      data-testid={`edit-project-${project.id}`}
+                    >
+                      Edit
+                    </Button>
                     <Button
                       size="sm"
                       variant="danger"

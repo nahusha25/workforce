@@ -70,8 +70,18 @@ export async function getClientsApi(): Promise<ClientResponseData[]> {
   return res.data;
 }
 
+export async function getClientByIdApi(id: string): Promise<ClientResponseData> {
+  const res = await apiClient.get<ClientResponseData>(`/admin/clients/${id}`);
+  return res.data;
+}
+
 export async function createClientApi(data: ClientCreateData): Promise<ClientResponseData> {
   const res = await apiClient.post<ClientResponseData>('/admin/clients', data);
+  return res.data;
+}
+
+export async function updateClientApi(id: string, data: Partial<ClientCreateData>): Promise<ClientResponseData> {
+  const res = await apiClient.put<ClientResponseData>(`/admin/clients/${id}`, data);
   return res.data;
 }
 
@@ -85,8 +95,18 @@ export async function getProjectsApi(): Promise<ProjectResponseData[]> {
   return res.data;
 }
 
+export async function getProjectByIdApi(id: string): Promise<ProjectResponseData> {
+  const res = await apiClient.get<ProjectResponseData>(`/admin/projects/${id}`);
+  return res.data;
+}
+
 export async function createProjectApi(data: ProjectCreateData): Promise<ProjectResponseData> {
   const res = await apiClient.post<ProjectResponseData>('/admin/projects', data);
+  return res.data;
+}
+
+export async function updateProjectApi(id: string, data: Partial<ProjectCreateData>): Promise<ProjectResponseData> {
+  const res = await apiClient.put<ProjectResponseData>(`/admin/projects/${id}`, data);
   return res.data;
 }
 
@@ -100,8 +120,18 @@ export async function getSitesApi(): Promise<SiteResponseData[]> {
   return res.data;
 }
 
+export async function getSiteByIdApi(id: string): Promise<SiteResponseData> {
+  const res = await apiClient.get<SiteResponseData>(`/admin/sites/${id}`);
+  return res.data;
+}
+
 export async function createSiteApi(data: SiteCreateData): Promise<SiteResponseData> {
   const res = await apiClient.post<SiteResponseData>('/admin/sites', data);
+  return res.data;
+}
+
+export async function updateSiteApi(id: string, data: Partial<SiteCreateData>): Promise<SiteResponseData> {
+  const res = await apiClient.put<SiteResponseData>(`/admin/sites/${id}`, data);
   return res.data;
 }
 

@@ -9,14 +9,24 @@ import type { SystemRole } from '../types/auth';
 import * as employeeApi from '../api/employee';
 import type { EmployeeResponseData } from '../api/employee';
 
-// Mock API module
+// Mock API modules
 vi.mock('../api/employee', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/employee')>();
   return {
     ...actual,
     getAllEmployeesApi: vi.fn(),
-    getEmployeesApi: vi.fn(),
+    getEmployeesApi: vi.fn().mockResolvedValue([]),
     deleteEmployeeApi: vi.fn(),
+    updateEmployeeApi: vi.fn(),
+  };
+});
+
+vi.mock('../api/masterData', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/masterData')>();
+  return {
+    ...actual,
+    getRolesApi: vi.fn().mockResolvedValue([]),
+    getSitesApi: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -319,7 +329,7 @@ describe('EmployeesPage', () => {
     });
   });
 
-  it('hides delete buttons from director role', async () => {
+  it('hides delete and edit buttons from director role', async () => {
     vi.mocked(employeeApi.getAllEmployeesApi).mockResolvedValue(mockEmployees);
 
     renderWithRoleGuard('director');
@@ -329,6 +339,49 @@ describe('EmployeesPage', () => {
     });
 
     expect(screen.queryByTestId('delete-emp-emp-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('edit-emp-emp-1')).not.toBeInTheDocument();
+  });
+
+  it('allows administrator to open edit modal, submit changes, and refresh directory', async () => {
+    vi.mocked(employeeApi.getAllEmployeesApi).mockResolvedValue(mockEmployees);
+    vi.mocked(employeeApi.updateEmployeeApi).mockResolvedValue({
+      ...mockEmployees[0],
+      name: 'John Field Worker Updated',
+    });
+
+    renderWithRoleGuard('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByText('John Field Worker')).toBeInTheDocument();
+    });
+
+    // Check edit button exists on row and click it
+    const editBtn = screen.getByTestId('edit-emp-emp-1');
+    expect(editBtn).toBeInTheDocument();
+    fireEvent.click(editBtn);
+
+    // Verify modal is displayed
+    await waitFor(() => {
+      expect(screen.getByText(/Edit Employee: John Field Worker/)).toBeInTheDocument();
+    });
+
+    // Edit employee full name
+    const nameInput = screen.getByLabelText(/Full Name/);
+    fireEvent.change(nameInput, { target: { value: 'John Field Worker Updated' } });
+
+    // Submit the edit form
+    const saveBtn = screen.getByRole('button', { name: 'Save Changes' });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(employeeApi.updateEmployeeApi).toHaveBeenCalledWith('emp-1', expect.objectContaining({
+        name: 'John Field Worker Updated',
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('success-banner')).toHaveTextContent(/was updated successfully/);
+    });
   });
 });
 

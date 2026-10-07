@@ -504,3 +504,58 @@ def test_delete_employee_not_found(client: TestClient, admin_user):
     )
     assert del_resp.status_code == 404
 
+
+def test_update_employee_full_fields(client: TestClient, admin_user, setup_master_data):
+    _, admin_token = admin_user
+    master = setup_master_data
+
+    # Create employee with site1, role1
+    orig_mobile = f"+9198{str(uuid.uuid4().int)[:8]}"
+    create_payload = {
+        "employee_code": f"EMP-UPD-{str(uuid.uuid4().int)[:4]}",
+        "mobile_number": orig_mobile,
+        "name": "Original Worker",
+        "system_role": "employee",
+        "trade_role_ids": [str(master["role1_id"])],
+        "rate_type": "daily",
+        "rate_amount": 500.0,
+        "site_ids": [str(master["site1_id"])],
+    }
+    create_resp = client.post(
+        "/api/v1/employees",
+        json=create_payload,
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert create_resp.status_code == 201
+    emp_id = create_resp.json()["id"]
+
+    new_mobile = f"+9198{str(uuid.uuid4().int)[:8]}"
+    update_payload = {
+        "name": "Updated Worker Name",
+        "mobile_number": new_mobile,
+        "system_role": "supervisor",
+        "trade_role_ids": [str(master["role2_id"])],
+        "site_ids": [str(master["site2_id"])],
+        "rate_type": "monthly",
+        "rate_amount": 25000.0,
+        "is_active": False,
+    }
+    update_resp = client.put(
+        f"/api/v1/employees/{emp_id}",
+        json=update_payload,
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert update_resp.status_code == 200
+    data = update_resp.json()
+    assert data["name"] == "Updated Worker Name"
+    assert data["mobile_id"] == new_mobile
+    assert data["system_role"] == "supervisor"
+    assert data["is_active"] is False
+    assert len(data["trade_roles"]) == 1
+    assert data["trade_roles"][0]["name"] == master["role2_name"]
+    assert len(data["active_sites"]) == 1
+    assert data["active_sites"][0]["name"] == "Site Beta"
+    assert data["current_rate"]["rate_type"] == "monthly"
+    assert data["current_rate"]["rate_amount"] == 25000.0
+
+

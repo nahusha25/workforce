@@ -13,14 +13,17 @@ from app.modules.master_data.schemas import (
     ActivityUpdate,
     ClientCreate,
     ClientResponse,
+    ClientUpdate,
     MaterialCreate,
     MaterialResponse,
     MaterialUpdate,
     ProjectCreate,
     ProjectResponse,
+    ProjectUpdate,
     RoleResponse,
     SiteCreate,
     SiteResponse,
+    SiteUpdate,
     WorkOrderCreate,
     WorkOrderResponse,
     WorkOrderUpdate,
@@ -52,6 +55,23 @@ async def list_clients(
 ):
     return await service.get_clients(skip=skip, limit=limit)
 
+@router.get("/clients/{id}", response_model=ClientResponse)
+async def get_client(
+    id: uuid.UUID,
+    service: MasterDataService = Depends(get_master_data_service),
+    current_user: User = Depends(require_role(["administrator"]))
+):
+    return await service.get_client(id)
+
+@router.put("/clients/{id}", response_model=ClientResponse)
+async def update_client(
+    id: uuid.UUID,
+    client_in: ClientUpdate,
+    service: MasterDataService = Depends(get_master_data_service),
+    current_user: User = Depends(require_role(["administrator"]))
+):
+    return await service.update_client(id, client_in)
+
 @router.delete("/clients/{id}", status_code=status.HTTP_200_OK)
 async def delete_client(
     id: uuid.UUID,
@@ -80,6 +100,23 @@ async def list_projects(
 ):
     return await service.get_projects(skip=skip, limit=limit)
 
+@router.get("/projects/{id}", response_model=ProjectResponse)
+async def get_project(
+    id: uuid.UUID,
+    service: MasterDataService = Depends(get_master_data_service),
+    current_user: User = Depends(require_role(["administrator"]))
+):
+    return await service.get_project(id)
+
+@router.put("/projects/{id}", response_model=ProjectResponse)
+async def update_project(
+    id: uuid.UUID,
+    project_in: ProjectUpdate,
+    service: MasterDataService = Depends(get_master_data_service),
+    current_user: User = Depends(require_role(["administrator"]))
+):
+    return await service.update_project(id, project_in)
+
 @router.delete("/projects/{id}", status_code=status.HTTP_200_OK)
 async def delete_project(
     id: uuid.UUID,
@@ -107,6 +144,23 @@ async def list_sites(
     current_user: User = Depends(require_role(["administrator"]))
 ):
     return await service.get_sites(skip=skip, limit=limit)
+
+@router.get("/sites/{id}", response_model=SiteResponse)
+async def get_site(
+    id: uuid.UUID,
+    service: MasterDataService = Depends(get_master_data_service),
+    current_user: User = Depends(require_role(["administrator"]))
+):
+    return await service.get_site(id)
+
+@router.put("/sites/{id}", response_model=SiteResponse)
+async def update_site(
+    id: uuid.UUID,
+    site_in: SiteUpdate,
+    service: MasterDataService = Depends(get_master_data_service),
+    current_user: User = Depends(require_role(["administrator"]))
+):
+    return await service.update_site(id, site_in)
 
 @router.delete("/sites/{id}", status_code=status.HTTP_200_OK)
 async def delete_site(
