@@ -46,3 +46,20 @@ export async function getEmployeesApi(skip: number = 0, limit: number = 100): Pr
   });
   return res.data;
 }
+
+export async function getAllEmployeesApi(pageSize: number = 100): Promise<EmployeeResponseData[]> {
+  const allEmployees: EmployeeResponseData[] = [];
+  let skip = 0;
+
+  while (true) {
+    const page = await getEmployeesApi(skip, pageSize);
+    allEmployees.push(...page);
+    if (page.length < pageSize) {
+      break;
+    }
+    skip += pageSize;
+  }
+
+  return allEmployees;
+}
+

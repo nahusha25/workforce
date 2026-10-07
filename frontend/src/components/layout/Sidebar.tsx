@@ -50,33 +50,45 @@ export const Sidebar: React.FC = () => {
           </>
         )}
 
-        {isAdmin && (
+        {isAdminOrDirector && (
           <>
             <div className={styles.sectionTitle}>Administration</div>
+            {isAdmin && (
+              <NavLink
+                to="/onboarding"
+                className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+              >
+                Employee Onboarding
+              </NavLink>
+            )}
             <NavLink
-              to="/onboarding"
+              to="/admin/employees"
               className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
             >
-              Employee Onboarding
+              Employees
             </NavLink>
-            <NavLink
-              to="/admin/clients"
-              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
-            >
-              Clients
-            </NavLink>
-            <NavLink
-              to="/admin/projects"
-              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
-            >
-              Projects
-            </NavLink>
-            <NavLink
-              to="/admin/sites"
-              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
-            >
-              Sites
-            </NavLink>
+            {isAdmin && (
+              <>
+                <NavLink
+                  to="/admin/clients"
+                  className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+                >
+                  Clients
+                </NavLink>
+                <NavLink
+                  to="/admin/projects"
+                  className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+                >
+                  Projects
+                </NavLink>
+                <NavLink
+                  to="/admin/sites"
+                  className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+                >
+                  Sites
+                </NavLink>
+              </>
+            )}
           </>
         )}
 

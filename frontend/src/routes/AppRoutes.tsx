@@ -19,6 +19,7 @@ import { MaterialsPage } from '../pages/MaterialsPage';
 import { SupervisorVerificationQueuePage } from '../pages/SupervisorVerificationQueuePage';
 import { EmployeeDayVerificationPage } from '../pages/EmployeeDayVerificationPage';
 import { DirectorDashboardPage } from '../pages/DirectorDashboardPage';
+import { EmployeesPage } from '../pages/EmployeesPage';
 import { ReportPage } from '../pages/ReportPage';
 
 export const AppRoutes: React.FC = () => {
@@ -58,6 +59,7 @@ export const AppRoutes: React.FC = () => {
 
             {/* Admin & Director Master Data Routes */}
             <Route element={<RoleGuard allowedRoles={['administrator', 'director']} />}>
+              <Route path="/admin/employees" element={<EmployeesPage />} />
               <Route path="/admin/work-orders" element={<WorkOrdersPage />} />
               <Route path="/admin/activities" element={<ActivitiesPage />} />
               <Route path="/admin/materials" element={<MaterialsPage />} />
