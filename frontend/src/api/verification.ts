@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import type { WorkMeasurementItem } from './dailyWork';
 
 export type EntityType = 'attendance' | 'daily_work' | 'material' | 'material_transaction';
 export type VerificationAction = 'approved' | 'rejected' | 'correction_required';
@@ -70,6 +71,7 @@ export interface EmployeeDayPhotoDetail {
   image_url: string;
   thumbnail_url: string | null;
   file_size_bytes: number | null;
+  photo_type?: string | null;
   uploaded_at: string;
 }
 
@@ -108,6 +110,7 @@ export interface EmployeeDayWorkEntryDetail {
   verification_action: string | null;
   verification_remarks: string | null;
   history: VerificationHistoryEvent[];
+  measurements?: WorkMeasurementItem[];
   photos: EmployeeDayPhotoDetail[];
   materials: EmployeeDayMaterialDetail[];
 }

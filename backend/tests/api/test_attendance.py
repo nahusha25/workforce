@@ -551,3 +551,160 @@ def test_check_out_pre_validation_soft_check(client: TestClient, standard_employ
     assert "draft" in res_out2.json()["warning"]
 
 
+def test_attendance_list_exposes_gps_coordinates_and_distance(client: TestClient, standard_employee, supervisor_user, sync_db_session: Session):
+    """Supervisor attendance list exposes check-in coordinates, distance, and site coordinates."""
+    user1, emp1, token1 = standard_employee
+    sup_user, sup_emp, sup_token = supervisor_user
+
+    # Assign emp1 to supervisor
+    from app.models.workforce import Employee
+    e = sync_db_session.query(Employee).filter(Employee.id == emp1.id).first()
+    e.supervisor_id = sup_emp.id
+    sync_db_session.commit()
+
+    # Employee checks in at specific coordinates (e.g. outside geofence in London)
+    # 51.5074, -0.1278
+    in_lat = 51.5074
+    in_lng = -0.1278
+    res_in = client.post(
+        "/api/v1/attendance/check-in",
+        headers={"Authorization": f"Bearer {token1}"},
+        json={"latitude": in_lat, "longitude": in_lng}
+    )
+    assert res_in.status_code == 201
+    rec_id = res_in.json()["record_id"]
+
+    # Supervisor lists attendance
+    res_list = client.get(
+        "/api/v1/attendance",
+        headers={"Authorization": f"Bearer {sup_token}"}
+    )
+    assert res_list.status_code == 200
+    data = res_list.json()
+    matching = [r for r in data["data"] if r["id"] == rec_id]
+    assert len(matching) == 1
+    rec = matching[0]
+
+    assert rec["check_in_latitude"] == in_lat
+    assert rec["check_in_longitude"] == in_lng
+    assert rec["check_in_distance_m"] is not None
+    assert rec["check_in_distance_m"] > 1000  # London is ~343 km from Paris site
+    assert rec["is_within_geofence"] is False
+    assert rec["status"] == "flagged"
+
+    # Site coordinates (Site was created at POINT(2.3522 48.8566))
+    assert rec["site_latitude"] == 48.8566
+    assert rec["site_longitude"] == 2.3522
+    assert rec["site_permitted_radius_m"] == 500.0
+
+
+def test_attendance_detail_exposes_gps_coordinates_and_checkout(client: TestClient, standard_employee, supervisor_user, sync_db_session: Session):
+    """Attendance detail endpoint returns check-in and check-out coordinates and distances."""
+    user1, emp1, token1 = standard_employee
+    sup_user, sup_emp, sup_token = supervisor_user
+
+    from app.models.workforce import Employee
+    e = sync_db_session.query(Employee).filter(Employee.id == emp1.id).first()
+    e.supervisor_id = sup_emp.id
+    sync_db_session.commit()
+
+    # Check in
+    res_in = client.post(
+        "/api/v1/attendance/check-in",
+        headers={"Authorization": f"Bearer {token1}"},
+        json={"latitude": 48.8567, "longitude": 2.3523}
+    )
+    assert res_in.status_code == 201
+    rec_id = res_in.json()["record_id"]
+
+    # Check out
+    res_out = client.post(
+        "/api/v1/attendance/check-out",
+        headers={"Authorization": f"Bearer {token1}"},
+        json={"latitude": 48.8569, "longitude": 2.3525}
+    )
+    assert res_out.status_code == 200
+
+    # Supervisor retrieves detail
+    res_detail = client.get(
+        f"/api/v1/attendance/{rec_id}",
+        headers={"Authorization": f"Bearer {sup_token}"}
+    )
+    assert res_detail.status_code == 200
+    rec = res_detail.json()
+
+    assert rec["id"] == rec_id
+    assert rec["check_in_latitude"] == 48.8567
+    assert rec["check_in_longitude"] == 2.3523
+    assert rec["check_in_distance_m"] is not None
+
+    assert rec["check_out_latitude"] == 48.8569
+    assert rec["check_out_longitude"] == 2.3525
+    assert rec["check_out_distance_m"] is not None
+
+    assert rec["site_latitude"] == 48.8566
+    assert rec["site_longitude"] == 2.3522
+    assert rec["site_permitted_radius_m"] == 500.0
+
+
+def test_attendance_handles_missing_coordinates_safely(client: TestClient, standard_employee, supervisor_user, test_data, sync_db_session: Session):
+    """Attendance endpoints return None for missing coordinates without fake coordinates or (0,0)."""
+    user1, emp1, token1 = standard_employee
+    sup_user, sup_emp, sup_token = supervisor_user
+    site = test_data["site"]
+
+    from app.models.workforce import Employee
+    e = sync_db_session.query(Employee).filter(Employee.id == emp1.id).first()
+    e.supervisor_id = sup_emp.id
+    sync_db_session.commit()
+
+    from datetime import date, datetime, timezone
+    today = datetime.now(timezone.utc).date()
+
+    # Create record with NULL coordinates
+    rec_null = AttendanceRecord(
+        id=uuid.uuid4(),
+        employee_id=emp1.id,
+        site_id=site.id,
+        date=today,
+        session_number=99,
+        check_in_time=datetime.now(timezone.utc),
+        check_in_location=None,
+        check_in_distance_m=None,
+        check_out_time=None,
+        check_out_location=None,
+        check_out_distance_m=None,
+        is_within_geofence=None,
+        status="flagged",
+    )
+    sync_db_session.add(rec_null)
+    sync_db_session.commit()
+
+    # Detail
+    res_detail = client.get(
+        f"/api/v1/attendance/{rec_null.id}",
+        headers={"Authorization": f"Bearer {sup_token}"}
+    )
+    assert res_detail.status_code == 200
+    detail = res_detail.json()
+    assert detail["check_in_latitude"] is None
+    assert detail["check_in_longitude"] is None
+    assert detail["check_in_distance_m"] is None
+    assert detail["check_out_latitude"] is None
+    assert detail["check_out_longitude"] is None
+    assert detail["check_out_distance_m"] is None
+
+    # List
+    res_list = client.get(
+        "/api/v1/attendance",
+        headers={"Authorization": f"Bearer {sup_token}"}
+    )
+    assert res_list.status_code == 200
+    matching = [r for r in res_list.json()["data"] if r["id"] == str(rec_null.id)]
+    assert len(matching) == 1
+    assert matching[0]["check_in_latitude"] is None
+    assert matching[0]["check_in_longitude"] is None
+    assert matching[0]["check_in_distance_m"] is None
+
+
+

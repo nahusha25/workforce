@@ -5,7 +5,12 @@ import { MemoryRouter } from 'react-router-dom';
 import { SitesPage } from './SitesPage';
 import { AuthContext } from '../context/AuthContext';
 import * as masterDataApi from '../api/masterData';
+import * as nominatimApi from '../api/nominatim';
 import type { SystemRole } from '../types/auth';
+
+vi.mock('../api/nominatim', () => ({
+  searchNominatim: vi.fn(),
+}));
 
 vi.mock('../api/masterData', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/masterData')>();
@@ -194,5 +199,196 @@ describe('SitesPage', () => {
 
     expect(screen.queryByTestId('edit-site-site-1')).not.toBeInTheDocument();
     expect(screen.queryByTestId('delete-site-site-1')).not.toBeInTheDocument();
+  });
+
+  it('creates a new site with address autocomplete search and saves in POINT(longitude latitude) format', async () => {
+    vi.mocked(masterDataApi.getProjectsApi).mockResolvedValue(mockProjects);
+    vi.mocked(masterDataApi.getSitesApi).mockResolvedValue(mockSites);
+    vi.mocked(masterDataApi.createSiteApi).mockResolvedValue({
+      id: 'site-3',
+      name: 'MG Road Metro Station',
+      project_id: 'proj-1',
+      address: 'Cubbon Park, MG Road, Bengaluru',
+      location: 'POINT(77.594562 12.971598)',
+      permitted_radius_m: 200,
+      is_active: true,
+    });
+    vi.mocked(nominatimApi.searchNominatim).mockResolvedValue([
+      {
+        place_id: 201,
+        lat: '12.971598',
+        lon: '77.594562',
+        display_name: 'Cubbon Park, MG Road, Bengaluru, Karnataka, 560001, India',
+      },
+    ]);
+
+    renderSitesPage('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByText('Central Junction Site')).toBeInTheDocument();
+    });
+
+    // Open add site form
+    fireEvent.click(screen.getByTestId('add-site-btn'));
+    expect(screen.getByText('Register New Construction Site')).toBeInTheDocument();
+
+    // Fill name
+    fireEvent.change(screen.getByTestId('site-name-input'), {
+      target: { value: 'MG Road Metro Station' },
+    });
+
+    // Use Nominatim search in LocationPicker
+    const searchInput = screen.getByTestId('location-search-input');
+    fireEvent.change(searchInput, { target: { value: 'Cubbon Park' } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search-item-0')).toBeInTheDocument();
+    });
+
+    // Click search item
+    fireEvent.click(screen.getByTestId('location-search-item-0'));
+
+    // Verify address auto-fill and coordinate readout
+    await waitFor(() => {
+      expect(screen.getByTestId('location-lat-display')).toHaveTextContent('Lat: 12.971598');
+      expect(screen.getByTestId('location-lng-display')).toHaveTextContent('Lng: 77.594562');
+    });
+
+    // Change radius to 200m
+    fireEvent.change(screen.getByTestId('site-radius-input'), {
+      target: { value: '200' },
+    });
+
+    // Submit form
+    fireEvent.click(screen.getByTestId('save-site-btn'));
+
+    await waitFor(() => {
+      expect(masterDataApi.createSiteApi).toHaveBeenCalledWith({
+        name: 'MG Road Metro Station',
+        project_id: 'proj-1',
+        address: 'Cubbon Park, MG Road, Bengaluru, Karnataka, 560001, India',
+        location: 'POINT(77.594562 12.971598)',
+        permitted_radius_m: 200,
+        is_active: true,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Site "MG Road Metro Station" created successfully!/i)).toBeInTheDocument();
+    });
+  });
+
+  it('restores saved marker coordinates and radius correctly in edit mode', async () => {
+    const siteWithLocation = [
+      {
+        id: 'site-loc-1',
+        name: 'Geofenced Site',
+        project_id: 'proj-1',
+        address: 'MG Road',
+        location: 'POINT(77.594562 12.971598)',
+        permitted_radius_m: 250,
+        is_active: true,
+      },
+    ];
+
+    vi.mocked(masterDataApi.getProjectsApi).mockResolvedValue(mockProjects);
+    vi.mocked(masterDataApi.getSitesApi).mockResolvedValue(siteWithLocation);
+    vi.mocked(masterDataApi.updateSiteApi).mockResolvedValue({
+      ...siteWithLocation[0],
+      permitted_radius_m: 300,
+    });
+
+    renderSitesPage('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByText('Geofenced Site')).toBeInTheDocument();
+    });
+
+    // Click edit
+    fireEvent.click(screen.getByTestId('edit-site-site-loc-1'));
+
+    expect(screen.getByText('Edit Construction Site')).toBeInTheDocument();
+
+    // Verify restored coordinates in LocationPicker
+    expect(screen.getByTestId('location-lat-display')).toHaveTextContent('Lat: 12.971598');
+    expect(screen.getByTestId('location-lng-display')).toHaveTextContent('Lng: 77.594562');
+
+    // Verify restored radius
+    const radiusInput = screen.getByTestId('site-radius-input') as HTMLInputElement;
+    expect(radiusInput.value).toBe('250');
+
+    // Update radius via preset pill
+    fireEvent.click(screen.getByTestId('location-radius-preset-500'));
+    expect(radiusInput.value).toBe('500');
+
+    // Save update
+    fireEvent.click(screen.getByTestId('save-site-btn'));
+
+    await waitFor(() => {
+      expect(masterDataApi.updateSiteApi).toHaveBeenCalledWith('site-loc-1', {
+        name: 'Geofenced Site',
+        project_id: 'proj-1',
+        address: 'MG Road',
+        location: 'POINT(77.594562 12.971598)',
+        permitted_radius_m: 500,
+        is_active: true,
+      });
+    });
+  });
+
+  it('requires a valid location for sites intended for GPS attendance and blocks submission without location', async () => {
+    vi.mocked(masterDataApi.getProjectsApi).mockResolvedValue(mockProjects);
+    vi.mocked(masterDataApi.getSitesApi).mockResolvedValue(mockSites);
+
+    renderSitesPage('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByText('Central Junction Site')).toBeInTheDocument();
+    });
+
+    // Open add site form
+    fireEvent.click(screen.getByTestId('add-site-btn'));
+
+    // Fill name but omit location
+    fireEvent.change(screen.getByTestId('site-name-input'), {
+      target: { value: 'Site Missing GPS' },
+    });
+
+    // Save with GPS attendance required
+    fireEvent.click(screen.getByTestId('save-site-btn'));
+
+    // Should show validation error
+    await waitFor(() => {
+      expect(screen.getByText(/Please select a valid site location on the map for GPS geofenced attendance/i)).toBeInTheDocument();
+    });
+    expect(masterDataApi.createSiteApi).not.toHaveBeenCalled();
+  });
+
+  it('displays formatted location coordinates on site cards', async () => {
+    const sitesWithCoords = [
+      {
+        id: 'site-coord-1',
+        name: 'South Gate Tower',
+        project_id: 'proj-1',
+        address: 'Outer Ring Road',
+        location: 'POINT(77.594562 12.971598)',
+        permitted_radius_m: 100,
+        is_active: true,
+      },
+    ];
+
+    vi.mocked(masterDataApi.getProjectsApi).mockResolvedValue(mockProjects);
+    vi.mocked(masterDataApi.getSitesApi).mockResolvedValue(sitesWithCoords);
+
+    renderSitesPage('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByText('South Gate Tower')).toBeInTheDocument();
+    });
+
+    // Should display human-readable coordinates
+    expect(screen.getByText(/12.971598° N, 77.594562° E/)).toBeInTheDocument();
+    expect(screen.getByText(/Geofence Radius:/)).toBeInTheDocument();
+    expect(screen.getByText(/100 m/)).toBeInTheDocument();
   });
 });

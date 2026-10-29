@@ -624,6 +624,65 @@ def test_wrk_005_submit_work_entry_and_conflict(client: TestClient, daily_work_s
     assert audit is not None
 
 
+def test_wrk_005_submit_work_entry_cascades_material_status(client: TestClient, daily_work_setup):
+    """Test that submitting a daily work entry transitions linked draft materials to submitted."""
+    token1 = daily_work_setup["emp1_token"]
+    act = daily_work_setup["activity"]
+    mat = daily_work_setup["material"]
+
+    # 1. Create Daily Work Entry
+    create_res = client.post(
+        "/api/v1/daily-work",
+        json={"idempotency_key": str(uuid.uuid4()), "activity_id": str(act.id), "quantity": 3.0},
+        headers={"Authorization": f"Bearer {token1}"},
+    )
+    assert create_res.status_code == 201
+    entry_id = create_res.json()["id"]
+
+    # 2. Add a consumed material and a purchased material (both start in draft)
+    mat_res1 = client.post(
+        f"/api/v1/daily-work/{entry_id}/materials",
+        json={
+            "material_id": str(mat.id),
+            "transaction_type": "consumed",
+            "item_name": mat.name,
+            "quantity": 2.0,
+            "amount": 0.0,
+        },
+        headers={"Authorization": f"Bearer {token1}"},
+    )
+    assert mat_res1.status_code == 201
+    assert mat_res1.json()["status"] == "draft"
+
+    mat_res2 = client.post(
+        f"/api/v1/daily-work/{entry_id}/materials",
+        json={
+            "transaction_type": "purchased",
+            "item_name": "Screws Box",
+            "quantity": 1.0,
+            "amount": 150.0,
+        },
+        headers={"Authorization": f"Bearer {token1}"},
+    )
+    assert mat_res2.status_code == 201
+    assert mat_res2.json()["status"] == "draft"
+
+    # 3. Submit Daily Work Entry
+    submit_res = client.post(f"/api/v1/daily-work/{entry_id}/submit", headers={"Authorization": f"Bearer {token1}"})
+    assert submit_res.status_code == 200
+    submit_data = submit_res.json()
+    assert submit_data["status"] == "submitted"
+    assert len(submit_data["materials"]) == 2
+    for m in submit_data["materials"]:
+        assert m["status"] == "submitted"
+
+    # 4. Verify GET /daily-work/{id}/materials reflects submitted status
+    get_mats = client.get(f"/api/v1/daily-work/{entry_id}/materials", headers={"Authorization": f"Bearer {token1}"})
+    assert get_mats.status_code == 200
+    for m in get_mats.json():
+        assert m["status"] == "submitted"
+
+
 # ==============================================================================
 # WRK-006: POST /api/v1/daily-work/{id}/photos
 # ==============================================================================

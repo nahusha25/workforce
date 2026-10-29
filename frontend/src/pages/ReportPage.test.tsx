@@ -153,4 +153,75 @@ describe('ReportPage', () => {
       );
     });
   });
+
+  it('renders payment summary with default scope "all" and explanatory notice banner', async () => {
+    vi.mocked(dashboardApi.useReportData).mockReturnValue({
+      data: {
+        data: [],
+        total: 0,
+        page: 1,
+        page_size: 50,
+        scope: 'all',
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    renderWithContext('/reports/payment-summary', 'director');
+
+    // Scope toggle should be present and defaulting to 'all'
+    const scopeSelect = screen.getByTestId('filter-payment-scope') as HTMLSelectElement;
+    expect(scopeSelect).toBeTruthy();
+    expect(scopeSelect.value).toBe('all');
+
+    // Notice banner should explain Total Earned Labor scope
+    const notice = screen.getByTestId('payment-scope-notice');
+    expect(notice).toBeTruthy();
+    expect(notice.textContent).toContain('Total Earned Labor Scope');
+    expect(notice.textContent).toContain('Does not reflect unpaid payroll liabilities');
+  });
+
+  it('toggles scope to "unbilled_only" and forwards scope to export', async () => {
+    vi.mocked(dashboardApi.useReportData).mockReturnValue({
+      data: {
+        data: [],
+        total: 0,
+        page: 1,
+        page_size: 50,
+        scope: 'unbilled_only',
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    renderWithContext('/reports/payment-summary', 'director');
+
+    const scopeSelect = screen.getByTestId('filter-payment-scope') as HTMLSelectElement;
+    fireEvent.change(scopeSelect, { target: { value: 'unbilled_only' } });
+
+    expect(scopeSelect.value).toBe('unbilled_only');
+
+    // Notice banner updates to unbilled explanation
+    const notice = screen.getByTestId('payment-scope-notice');
+    expect(notice.textContent).toContain('Unbilled Only Scope');
+    expect(notice.textContent).toContain('Cancelled payment records release their source entries');
+
+    // Export button should forward scope: 'unbilled_only'
+    const excelBtn = screen.getByTestId('export-excel-btn');
+    fireEvent.click(excelBtn);
+
+    await waitFor(() => {
+      expect(dashboardApi.downloadReportExport).toHaveBeenCalledWith(
+        'payment-summary',
+        'xlsx',
+        expect.objectContaining({
+          scope: 'unbilled_only',
+        })
+      );
+    });
+  });
 });

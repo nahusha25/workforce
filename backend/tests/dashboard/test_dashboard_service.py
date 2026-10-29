@@ -35,6 +35,7 @@ from app.models.operations import (
     Project,
     Site,
 )
+from app.models.employee_payments import EmployeePayment, EmployeePaymentLine
 from app.models.workforce import Employee, EmployeeRateHistory, Role
 from app.modules.dashboard.schemas import DashboardFilters
 from app.modules.dashboard.service import DashboardService
@@ -217,6 +218,9 @@ async def _setup(session: AsyncSession):
         act_cable=act_cable, act_device=act_device,
         client=client,
         d1=d1, d2=d2, d3=d3,
+        att_a1=att_a1, att_a2=att_a2, att_a3=att_a3,
+        dwe_b_cable=dwe_b_cable,
+        sup_emp=sup_emp, u_sup=u_sup,
     )
 
 
@@ -347,6 +351,129 @@ class TestDashboardMetrics:
             f = _full_filters(site_id=ctx["site_other"].id)
             cost = await DashboardService._get_material_cost(session, f)
             assert cost.total_amount == Decimal("200")
+
+    @pytest.mark.asyncio
+    async def test_material_metrics_use_daily_work_entry_work_date_regression(self):
+        """
+        D-2 Regression Test:
+        Material transactions must be included in the reporting period based on parent
+        DailyWorkEntry.work_date, even when MaterialTransaction.created_at falls in a different period.
+        Transactions with DailyWorkEntry.work_date outside the period must be excluded even if
+        MaterialTransaction.created_at is within the period.
+        """
+        async with TestingSessionLocal() as session:
+            ctx = await _setup(session)
+            sfx = str(_u())[:8]
+
+            # Create attendance records
+            att_aug = AttendanceRecord(
+                id=_u(), employee_id=ctx["emp_a"].id, site_id=ctx["site_main"].id,
+                date=date(2025, 8, 15), working_hours=Decimal("8"), overtime_hours=Decimal("0"),
+                status="approved",
+            )
+            att_jul = AttendanceRecord(
+                id=_u(), employee_id=ctx["emp_a"].id, site_id=ctx["site_main"].id,
+                date=date(2025, 7, 20), working_hours=Decimal("8"), overtime_hours=Decimal("0"),
+                status="approved",
+            )
+            session.add_all([att_aug, att_jul])
+            await session.flush()
+
+            # 1. Entry with work_date in August 2025, but created_at in September 2025
+            dwe_aug = DailyWorkEntry(
+                id=_u(),
+                idempotency_key=f"ik-dwe-aug-{sfx}",
+                attendance_record_id=att_aug.id,
+                employee_id=ctx["emp_a"].id,
+                site_id=ctx["site_main"].id,
+                activity_id=ctx["act_cable"].id,
+                work_date=date(2025, 8, 15),
+                quantity=Decimal("100"),
+                uom="metres",
+                status="approved",
+            )
+            session.add(dwe_aug)
+            await session.flush()
+
+            mt_created_sep = MaterialTransaction(
+                id=_u(),
+                daily_work_entry_id=dwe_aug.id,
+                site_id=ctx["site_main"].id,
+                transaction_type="purchased",
+                item_name="Sep Created Cable",
+                quantity=Decimal("10"),
+                amount=Decimal("3500.00"),
+                is_high_value=False,
+                status="approved",
+                created_at=datetime(2025, 9, 10, 10, 0, 0, tzinfo=timezone.utc),
+                updated_at=datetime(2025, 9, 10, 10, 0, 0, tzinfo=timezone.utc),
+            )
+
+            # 2. Entry with work_date in July 2025, but created_at in August 2025
+            dwe_jul = DailyWorkEntry(
+                id=_u(),
+                idempotency_key=f"ik-dwe-jul-{sfx}",
+                attendance_record_id=att_jul.id,
+                employee_id=ctx["emp_a"].id,
+                site_id=ctx["site_main"].id,
+                activity_id=ctx["act_cable"].id,
+                work_date=date(2025, 7, 20),
+                quantity=Decimal("50"),
+                uom="metres",
+                status="approved",
+            )
+            session.add(dwe_jul)
+            await session.flush()
+
+            mt_created_aug = MaterialTransaction(
+                id=_u(),
+                daily_work_entry_id=dwe_jul.id,
+                site_id=ctx["site_main"].id,
+                transaction_type="purchased",
+                item_name="Jul Work Cable",
+                quantity=Decimal("5"),
+                amount=Decimal("4200.00"),
+                is_high_value=False,
+                status="approved",
+                created_at=datetime(2025, 8, 10, 10, 0, 0, tzinfo=timezone.utc),
+                updated_at=datetime(2025, 8, 10, 10, 0, 0, tzinfo=timezone.utc),
+            )
+
+            session.add_all([mt_created_sep, mt_created_aug])
+            await session.flush()
+
+            # Query for August 2025
+            f_aug = DashboardFilters(
+                site_id=ctx["site_main"].id,
+                date_from=date(2025, 8, 1),
+                date_to=date(2025, 8, 31),
+            )
+
+            cost = await DashboardService._get_material_cost(session, f_aug)
+            # Baseline site_main approved in _setup was 1000 + 500 = 1500.
+            # mt_created_sep has work_date in Aug -> must be included (+3500 -> 5000).
+            # mt_created_aug has work_date in Jul -> must NOT be included (not +4200).
+            assert cost.total_amount == Decimal("5000.00")
+
+            approval = await DashboardService._get_approval_status(session, f_aug)
+            # Baseline approved materials was 2. Plus mt_created_sep = 3.
+            assert approval.materials.approved == 3
+
+            report = await DashboardService.get_materials_report(session, f_aug)
+            item_names = {r.item_name for r in report.data}
+            assert "Sep Created Cable" in item_names
+            assert "Jul Work Cable" not in item_names
+
+            # Query for September 2025
+            f_sep = DashboardFilters(
+                site_id=ctx["site_main"].id,
+                date_from=date(2025, 9, 1),
+                date_to=date(2025, 9, 30),
+            )
+            report_sep = await DashboardService.get_materials_report(session, f_sep)
+            item_names_sep = {r.item_name for r in report_sep.data}
+            # mt_created_sep has created_at in Sep, but work_date in Aug -> must NOT appear in Sep
+            assert "Sep Created Cable" not in item_names_sep
 
     @pytest.mark.asyncio
     async def test_approval_status_counts_all_states(self):
@@ -743,6 +870,265 @@ class TestReports:
             # emp_c has no approved attendance → not in summary at all
             emp_c_ids = [r.employee_id for r in resp.data]
             assert ctx["emp_c"].id not in emp_c_ids
+
+    @pytest.mark.asyncio
+    async def test_payment_summary_scope_default_unchanged(self):
+        """Default scope is 'all', and explicitly passing scope='all' gives identical result."""
+        async with TestingSessionLocal() as session:
+            ctx = await _setup(session)
+            f = _full_filters()
+
+            resp_default = await DashboardService.get_payment_summary_report(session, f, page_size=1000)
+            resp_all = await DashboardService.get_payment_summary_report(session, f, page_size=1000, scope="all")
+
+            assert resp_default.scope == "all"
+            assert resp_all.scope == "all"
+            assert len(resp_default.data) == len(resp_all.data)
+            assert resp_default.total == resp_all.total
+
+            for r1, r2 in zip(resp_default.data, resp_all.data):
+                assert r1.employee_id == r2.employee_id
+                assert r1.approved_days == r2.approved_days
+                assert r1.approved_quantity == r2.approved_quantity
+                assert r1.estimated_gross == r2.estimated_gross
+
+    @pytest.mark.asyncio
+    async def test_payment_summary_scope_unbilled_only_and_cancellation(self):
+        """
+        D-4:
+        - When scope='unbilled_only', records attached to active EmployeePaymentLine are excluded.
+        - Daily rate worker loses billed attendance days.
+        - Piece rate worker loses billed daily work entries.
+        - When payment lines are cancelled (is_active=False), source records are released back to unbilled_only.
+        """
+        async with TestingSessionLocal() as session:
+            ctx = await _setup(session)
+            sfx = str(_u())[:8]
+
+            # Create an active EmployeePayment for emp_a with line for att_a1
+            pmt_a = EmployeePayment(
+                id=_u(),
+                payment_number=f"PAY-A-{sfx}",
+                idempotency_key=f"ik-pya-{sfx}",
+                employee_id=ctx["emp_a"].id,
+                period_start=PERIOD_FROM,
+                period_end=PERIOD_TO,
+                status="draft",
+                total_amount=Decimal("500.00"),
+                total_days=Decimal("1.00"),
+                created_by=ctx["u_sup"].id,
+            )
+            line_a = EmployeePaymentLine(
+                id=_u(),
+                payment_id=pmt_a.id,
+                source_attendance_id=ctx["att_a1"].id,
+                source_date=ctx["d1"],
+                rate_type="daily",
+                rate_amount=Decimal("500.00"),
+                rate_effective_from=date(2025, 1, 1),
+                days=Decimal("1.00"),
+                quantity=Decimal("0.00"),
+                amount=Decimal("500.00"),
+                is_active=True,
+            )
+
+            # Create an active EmployeePayment for emp_b with line for dwe_b_cable
+            pmt_b = EmployeePayment(
+                id=_u(),
+                payment_number=f"PAY-B-{sfx}",
+                idempotency_key=f"ik-pyb-{sfx}",
+                employee_id=ctx["emp_b"].id,
+                period_start=PERIOD_FROM,
+                period_end=PERIOD_TO,
+                status="draft",
+                total_amount=Decimal("30000.00"),
+                total_quantity=Decimal("300.00"),
+                created_by=ctx["u_sup"].id,
+            )
+            line_b = EmployeePaymentLine(
+                id=_u(),
+                payment_id=pmt_b.id,
+                source_daily_work_entry_id=ctx["dwe_b_cable"].id,
+                source_date=ctx["d1"],
+                rate_type="piece",
+                rate_amount=Decimal("100.00"),
+                rate_effective_from=date(2025, 1, 1),
+                days=Decimal("0.00"),
+                quantity=Decimal("300.00"),
+                amount=Decimal("30000.00"),
+                is_active=True,
+            )
+
+            session.add_all([pmt_a, line_a, pmt_b, line_b])
+            await session.commit()
+
+            f = _full_filters()
+
+            # 1. Scope = "all" preserves full history
+            resp_all = await DashboardService.get_payment_summary_report(session, f, page_size=1000, scope="all")
+            emp_a_all = next((r for r in resp_all.data if r.employee_id == ctx["emp_a"].id), None)
+            emp_b_all = next((r for r in resp_all.data if r.employee_id == ctx["emp_b"].id), None)
+
+            assert emp_a_all is not None
+            assert emp_a_all.approved_days == 3  # All 3 days visible
+            assert emp_a_all.estimated_gross == Decimal("1500.00")
+
+            assert emp_b_all is not None
+            assert emp_b_all.approved_quantity == Decimal("300")
+            assert emp_b_all.estimated_gross == Decimal("30000.00")
+
+            # 2. Scope = "unbilled_only" excludes actively locked lines
+            resp_unbilled = await DashboardService.get_payment_summary_report(session, f, page_size=1000, scope="unbilled_only")
+            assert resp_unbilled.scope == "unbilled_only"
+
+            emp_a_unbilled = next((r for r in resp_unbilled.data if r.employee_id == ctx["emp_a"].id), None)
+            emp_b_unbilled = next((r for r in resp_unbilled.data if r.employee_id == ctx["emp_b"].id), None)
+
+            # emp_a had 3 days; 1 was locked -> only 2 unbilled days remain
+            assert emp_a_unbilled is not None
+            assert emp_a_unbilled.approved_days == 2
+            assert emp_a_unbilled.estimated_gross == Decimal("1000.00")
+
+            # emp_b had 300 piece units; all 300 were locked -> no unbilled work remains
+            assert emp_b_unbilled is None
+
+            # 3. Cancel the payment / inactivate lines: sources must be released!
+            pmt_a.status = "cancelled"
+            line_a.is_active = False
+            pmt_b.status = "cancelled"
+            line_b.is_active = False
+            await session.commit()
+
+            resp_released = await DashboardService.get_payment_summary_report(session, f, page_size=1000, scope="unbilled_only")
+            emp_a_released = next((r for r in resp_released.data if r.employee_id == ctx["emp_a"].id), None)
+            emp_b_released = next((r for r in resp_released.data if r.employee_id == ctx["emp_b"].id), None)
+
+            # Now all 3 days are unbilled again
+            assert emp_a_released is not None
+            assert emp_a_released.approved_days == 3
+            assert emp_a_released.estimated_gross == Decimal("1500.00")
+
+            # emp_b's work entry is unbilled again
+            assert emp_b_released is not None
+            assert emp_b_released.approved_quantity == Decimal("300")
+            assert emp_b_released.estimated_gross == Decimal("30000.00")
+
+    @pytest.mark.asyncio
+    async def test_payment_summary_scope_unbilled_only_preserves_rate_bands(self):
+        """
+        When an employee has multiple effective rate bands, unbilled_only scope
+        correctly decrements only the rate band containing the billed source record.
+        """
+        async with TestingSessionLocal() as session:
+            ctx = await _setup(session)
+            sfx = str(_u())[:8]
+
+            u_rb = User(id=_u(), mobile_id=f"urb-{sfx}", role="employee", is_active=True)
+            session.add(u_rb)
+            await session.flush()
+
+            emp_rb = Employee(
+                id=_u(),
+                user_id=u_rb.id,
+                employee_code=f"RB-{sfx}",
+                mobile_id=u_rb.mobile_id,
+                name="RateBand Worker",
+                is_active=True,
+            )
+            session.add(emp_rb)
+            await session.flush()
+
+            # 2 rate bands:
+            # Band 1: 400 from Aug 1 to Aug 15
+            # Band 2: 600 from Aug 16 onward
+            rate1 = EmployeeRateHistory(
+                id=_u(),
+                employee_id=emp_rb.id,
+                rate_type="daily",
+                rate_amount=Decimal("400"),
+                effective_from=date(2025, 8, 1),
+                effective_to=date(2025, 8, 15),
+                changed_by=ctx["sup_emp"].id,
+            )
+            rate2 = EmployeeRateHistory(
+                id=_u(),
+                employee_id=emp_rb.id,
+                rate_type="daily",
+                rate_amount=Decimal("600"),
+                effective_from=date(2025, 8, 16),
+                effective_to=None,
+                changed_by=ctx["sup_emp"].id,
+            )
+            session.add_all([rate1, rate2])
+
+            att_b1_d1 = AttendanceRecord(
+                id=_u(), employee_id=emp_rb.id, site_id=ctx["site_main"].id,
+                date=date(2025, 8, 5), working_hours=Decimal("8"), overtime_hours=Decimal("0"),
+                status="approved",
+            )
+            att_b1_d2 = AttendanceRecord(
+                id=_u(), employee_id=emp_rb.id, site_id=ctx["site_main"].id,
+                date=date(2025, 8, 10), working_hours=Decimal("8"), overtime_hours=Decimal("0"),
+                status="approved",
+            )
+            att_b2 = AttendanceRecord(
+                id=_u(), employee_id=emp_rb.id, site_id=ctx["site_main"].id,
+                date=date(2025, 8, 20), working_hours=Decimal("8"), overtime_hours=Decimal("0"),
+                status="approved",
+            )
+            session.add_all([att_b1_d1, att_b1_d2, att_b2])
+            await session.flush()
+
+            # Lock 1 attendance in Band 1 (att_b1_d1) into active payment line
+            pmt = EmployeePayment(
+                id=_u(),
+                payment_number=f"PAY-RB-{sfx}",
+                idempotency_key=f"ik-pyrb-{sfx}",
+                employee_id=emp_rb.id,
+                period_start=PERIOD_FROM,
+                period_end=PERIOD_TO,
+                status="approved",
+                total_amount=Decimal("400.00"),
+                total_days=Decimal("1.00"),
+                created_by=ctx["u_sup"].id,
+            )
+            line = EmployeePaymentLine(
+                id=_u(),
+                payment_id=pmt.id,
+                source_attendance_id=att_b1_d1.id,
+                source_date=date(2025, 8, 5),
+                rate_type="daily",
+                rate_amount=Decimal("400.00"),
+                rate_effective_from=date(2025, 8, 1),
+                rate_effective_to=date(2025, 8, 15),
+                days=Decimal("1.00"),
+                quantity=Decimal("0.00"),
+                amount=Decimal("400.00"),
+                is_active=True,
+            )
+            session.add_all([pmt, line])
+            await session.commit()
+
+            f = DashboardFilters(
+                date_from=date(2025, 8, 1),
+                date_to=date(2025, 8, 31),
+                employee_id=emp_rb.id,
+            )
+
+            # Query with scope="unbilled_only"
+            resp = await DashboardService.get_payment_summary_report(session, f, scope="unbilled_only")
+            assert len(resp.data) == 2
+
+            band1 = next((r for r in resp.data if r.effective_rate == Decimal("400")), None)
+            band2 = next((r for r in resp.data if r.effective_rate == Decimal("600")), None)
+
+            assert band1 is not None
+            assert band1.approved_days == 1  # 2 total - 1 billed = 1 unbilled
+            assert band1.estimated_gross == Decimal("400.00")
+
+            assert band2 is not None
+            assert band2.approved_days == 1  # Untouched
+            assert band2.estimated_gross == Decimal("600.00")
 
     @pytest.mark.asyncio
     async def test_invoice_summary_aggregates_by_site(self):

@@ -1,6 +1,7 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { formatDecimal } from '../MaterialTransactionEntry';
+import { formatWorkingHours } from '../../utils/workingHours';
 import { StatusBadge } from '../ui/StatusBadge';
 import type {
   ReportType,
@@ -144,8 +145,8 @@ export const ReportTable: React.FC<ReportTableProps> = ({
             <td>{row.date}</td>
             <td>{row.check_in_time ? new Date(row.check_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
             <td>{row.check_out_time ? new Date(row.check_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-            <td>{row.working_hours !== null ? `${Number(row.working_hours).toFixed(2)}h` : '-'}</td>
-            <td>{row.overtime_hours !== null ? `${Number(row.overtime_hours).toFixed(2)}h` : '-'}</td>
+            <td>{formatWorkingHours(row.working_hours, '-')}</td>
+            <td>{formatWorkingHours(row.overtime_hours, '-')}</td>
             <td>
               {row.is_within_geofence === true && <span style={{ color: '#16a34a' }}>Inside</span>}
               {row.is_within_geofence === false && <span style={{ color: '#dc2626' }}>Outside</span>}
@@ -198,7 +199,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
         return (data as ProductivityReportRow[]).map((row) => (
           <tr key={row.employee_id} data-testid={`productivity-row-${row.employee_id}`}>
             <td style={{ fontWeight: 600 }}>{row.employee_name}</td>
-            <td>{Number(row.total_approved_hours).toFixed(2)} hrs</td>
+            <td>{formatWorkingHours(row.total_approved_hours, '-')}</td>
             <td>
               <div className={styles.categoryBreakdown}>
                 {row.by_category.length === 0 ? (
@@ -252,7 +253,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
         <div className={styles.disclaimerBanner} data-testid="payment-disclaimer-banner">
           <Info size={16} />
           <span>
-            <strong>Preview Only:</strong> Rates reflect effective-dated values from employee rate history. No payment records have been finalized.
+            <strong>Preview Only:</strong> Rates reflect effective-dated values from employee rate history. Default view reflects total earned labor value, not unpaid liabilities.
           </span>
         </div>
       )}

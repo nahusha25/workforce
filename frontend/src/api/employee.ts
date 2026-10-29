@@ -1,12 +1,15 @@
 import { apiClient } from './client';
 import type { SystemRole } from '../types/auth';
 
+export type EmployeeClassification = 'regular' | 'contract';
+
 export interface EmployeeCreateData {
   name: string;
   mobile_number: string;
   employee_code: string;
   system_role: SystemRole;
-  trade_role_ids: string[];
+  classification?: EmployeeClassification;
+  trade_role_ids?: string[];
   rate_type: string;
   rate_amount: number;
   supervisor_id?: string | null;
@@ -20,6 +23,7 @@ export interface EmployeeResponseData {
   mobile_id: string;
   name: string;
   system_role: SystemRole;
+  classification?: EmployeeClassification;
   supervisor_id?: string | null;
   is_active: boolean;
   created_at: string;
@@ -32,7 +36,12 @@ export interface EmployeeResponseData {
     effective_from: string;
     effective_to?: string | null;
   } | null;
-  active_sites: Array<{ id: string; name: string }>;
+  active_sites: Array<{
+    id: string;
+    name: string;
+    project_id?: string | null;
+    project_name?: string | null;
+  }>;
 }
 
 export async function createEmployeeApi(data: EmployeeCreateData): Promise<EmployeeResponseData> {
@@ -40,19 +49,35 @@ export async function createEmployeeApi(data: EmployeeCreateData): Promise<Emplo
   return res.data;
 }
 
-export async function getEmployeesApi(skip: number = 0, limit: number = 100): Promise<EmployeeResponseData[]> {
+export async function getEmployeesApi(
+  skip: number = 0,
+  limit: number = 100,
+  isActive?: boolean,
+  classification?: EmployeeClassification
+): Promise<EmployeeResponseData[]> {
+  const params: Record<string, any> = { skip, limit };
+  if (isActive !== undefined) {
+    params.is_active = isActive;
+  }
+  if (classification) {
+    params.classification = classification;
+  }
   const res = await apiClient.get<EmployeeResponseData[]>('/employees', {
-    params: { skip, limit },
+    params,
   });
   return res.data;
 }
 
-export async function getAllEmployeesApi(pageSize: number = 100): Promise<EmployeeResponseData[]> {
+export async function getAllEmployeesApi(
+  pageSize: number = 100,
+  isActive?: boolean,
+  classification?: EmployeeClassification
+): Promise<EmployeeResponseData[]> {
   const allEmployees: EmployeeResponseData[] = [];
   let skip = 0;
 
   while (true) {
-    const page = await getEmployeesApi(skip, pageSize);
+    const page = await getEmployeesApi(skip, pageSize, isActive, classification);
     allEmployees.push(...page);
     if (page.length < pageSize) {
       break;
@@ -67,6 +92,7 @@ export interface EmployeeUpdateData {
   name?: string;
   mobile_number?: string;
   system_role?: SystemRole;
+  classification?: EmployeeClassification;
   trade_role_ids?: string[];
   rate_type?: string;
   rate_amount?: number;

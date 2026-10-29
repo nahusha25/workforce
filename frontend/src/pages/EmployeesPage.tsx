@@ -32,7 +32,8 @@ export const EmployeesPage: React.FC = () => {
   // Filters
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('active');
+  const [classificationFilter, setClassificationFilter] = useState<string>('all');
 
   const fetchEmployees = async () => {
     setLoading(true);
@@ -61,9 +62,15 @@ export const EmployeesPage: React.FC = () => {
   ];
 
   const statusOptions: SelectOption[] = [
-    { value: 'all', label: 'All Statuses' },
     { value: 'active', label: 'Active' },
     { value: 'inactive', label: 'Inactive' },
+    { value: 'all', label: 'All Statuses' },
+  ];
+
+  const classificationOptions: SelectOption[] = [
+    { value: 'all', label: 'All Classifications' },
+    { value: 'regular', label: 'Regular Employee' },
+    { value: 'contract', label: 'Contract Employee' },
   ];
 
   const filteredEmployees = useMemo(() => {
@@ -85,9 +92,13 @@ export const EmployeesPage: React.FC = () => {
         (statusFilter === 'active' && emp.is_active) ||
         (statusFilter === 'inactive' && !emp.is_active);
 
-      return matchesSearch && matchesRole && matchesStatus;
+      // Classification filter
+      const matchesClassification =
+        classificationFilter === 'all' || (emp.classification || 'regular') === classificationFilter;
+
+      return matchesSearch && matchesRole && matchesStatus && matchesClassification;
     });
-  }, [employees, searchTerm, roleFilter, statusFilter]);
+  }, [employees, searchTerm, roleFilter, statusFilter, classificationFilter]);
 
   const getRoleBadgeClass = (systemRole: string) => {
     switch (systemRole) {
@@ -108,8 +119,11 @@ export const EmployeesPage: React.FC = () => {
     setDeleteError(null);
     setSuccessMsg(null);
     try {
-      await deleteEmployeeApi(deleteTarget.id);
-      setSuccessMsg(`Employee "${deleteTarget.name}" (${deleteTarget.employee_code}) was deleted successfully.`);
+      const res = await deleteEmployeeApi(deleteTarget.id);
+      setSuccessMsg(
+        res?.message ||
+          `Employee "${deleteTarget.name}" (${deleteTarget.employee_code}) was deleted successfully.`
+      );
       setDeleteTarget(null);
       await fetchEmployees();
     } catch (err: any) {
@@ -188,20 +202,29 @@ export const EmployeesPage: React.FC = () => {
           </div>
           <div className={styles.filterSelect}>
             <Select
+              options={classificationOptions}
+              value={classificationFilter}
+              onChange={(e) => setClassificationFilter(e.target.value)}
+              aria-label="Filter by classification"
+            />
+          </div>
+          <div className={styles.filterSelect}>
+            <Select
               options={statusOptions}
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="Filter by status"
             />
           </div>
-          {(searchTerm || roleFilter !== 'all' || statusFilter !== 'all') && (
+          {(searchTerm || roleFilter !== 'all' || statusFilter !== 'active' || classificationFilter !== 'all') && (
             <Button
               variant="outline"
               size="sm"
               onClick={() => {
                 setSearchTerm('');
                 setRoleFilter('all');
-                setStatusFilter('all');
+                setStatusFilter('active');
+                setClassificationFilter('all');
               }}
             >
               Reset Filters
@@ -235,6 +258,7 @@ export const EmployeesPage: React.FC = () => {
                 setSearchTerm('');
                 setRoleFilter('all');
                 setStatusFilter('all');
+                setClassificationFilter('all');
               }}
             >
               Clear Filters
@@ -249,6 +273,7 @@ export const EmployeesPage: React.FC = () => {
                 <th>Code</th>
                 <th>Name</th>
                 <th>Mobile Number</th>
+                <th>Classification</th>
                 <th>System Role</th>
                 <th>Trade Roles</th>
                 <th>Site Assignment</th>
@@ -270,6 +295,18 @@ export const EmployeesPage: React.FC = () => {
                   <td>{emp.mobile_id}</td>
                   <td>
                     <span
+                      className={`${styles.classificationBadge} ${
+                        emp.classification === 'contract'
+                          ? styles.classificationContract
+                          : styles.classificationRegular
+                      }`}
+                      data-testid={`classification-badge-${emp.id}`}
+                    >
+                      {emp.classification === 'contract' ? 'Contract' : 'Regular'}
+                    </span>
+                  </td>
+                  <td>
+                    <span
                       className={`${styles.roleBadge} ${getRoleBadgeClass(emp.system_role)}`}
                       data-testid={`role-badge-${emp.id}`}
                     >
@@ -287,6 +324,7 @@ export const EmployeesPage: React.FC = () => {
                         {emp.active_sites.map((site) => (
                           <span key={site.id} className={styles.siteTag}>
                             {site.name}
+                            {site.project_name ? ` (${site.project_name})` : ''}
                           </span>
                         ))}
                       </div>

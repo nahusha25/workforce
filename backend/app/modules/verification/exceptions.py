@@ -30,3 +30,13 @@ class MandatoryRemarksRequiredError(VerificationError):
 class UnauthorizedSupervisorError(VerificationError):
     def __init__(self, detail: str = "Supervisor is not authorized to verify records for this employee"):
         super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+class InsufficientMaterialStockError(VerificationError):
+    def __init__(self, detail: str = "Insufficient material stock available for approval"):
+        super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+class MissingCatalogueMaterialError(VerificationError):
+    def __init__(self, detail: str = "Consumed material transaction cannot be approved without a valid catalogue material."):
+        super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)

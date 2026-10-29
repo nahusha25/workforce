@@ -21,6 +21,14 @@ import { EmployeeDayVerificationPage } from '../pages/EmployeeDayVerificationPag
 import { DirectorDashboardPage } from '../pages/DirectorDashboardPage';
 import { EmployeesPage } from '../pages/EmployeesPage';
 import { ReportPage } from '../pages/ReportPage';
+import { InvoicesPage } from '../pages/InvoicesPage';
+import { InvoiceDetailPage } from '../pages/InvoiceDetailPage';
+import { EmployeePaymentsPage } from '../pages/EmployeePaymentsPage';
+import { EmployeePaymentDetailPage } from '../pages/EmployeePaymentDetailPage';
+import { AssetsPage } from '../pages/AssetsPage';
+import { AssetDetailPage } from '../pages/AssetDetailPage';
+import { OvertimeSettingsPage } from '../pages/OvertimeSettingsPage';
+import { InventoryPage } from '../pages/InventoryPage';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -47,6 +55,9 @@ export const AppRoutes: React.FC = () => {
               <Route path="/supervisor/attendance" element={<SupervisorAttendancePage />} />
               <Route path="/verification" element={<SupervisorVerificationQueuePage />} />
               <Route path="/verification/:employeeId" element={<EmployeeDayVerificationPage />} />
+              <Route path="/assets" element={<AssetsPage />} />
+              <Route path="/assets/:assetId" element={<AssetDetailPage />} />
+              <Route path="/inventory" element={<InventoryPage />} />
             </Route>
 
             {/* Admin Only Routes */}
@@ -63,13 +74,18 @@ export const AppRoutes: React.FC = () => {
               <Route path="/admin/work-orders" element={<WorkOrdersPage />} />
               <Route path="/admin/activities" element={<ActivitiesPage />} />
               <Route path="/admin/materials" element={<MaterialsPage />} />
+              <Route path="/admin/overtime-settings" element={<OvertimeSettingsPage />} />
             </Route>
 
-            {/* Director & Administrator Dashboard and Reports Routes */}
+            {/* Director & Administrator Dashboard, Reports, and Invoices Routes */}
             <Route element={<RoleGuard allowedRoles={['director', 'administrator']} />}>
               <Route path="/dashboard" element={<DirectorDashboardPage />} />
               <Route path="/reports" element={<Navigate to="/reports/attendance" replace />} />
               <Route path="/reports/:type" element={<ReportPage />} />
+              <Route path="/invoices" element={<InvoicesPage />} />
+              <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
+              <Route path="/employee-payments" element={<EmployeePaymentsPage />} />
+              <Route path="/employee-payments/:paymentId" element={<EmployeePaymentDetailPage />} />
             </Route>
           </Route>
         </Route>

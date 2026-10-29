@@ -24,6 +24,7 @@ export interface ReportQueryParams extends DashboardFilters {
   transaction_type?: string | null;
   is_high_value?: boolean | null;
   sort_category?: string | null;
+  scope?: 'all' | 'unbilled_only';
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +199,7 @@ export type MaterialsReportResponse = PaginatedReportResponse<MaterialsReportRow
 export type ProductivityReportResponse = PaginatedReportResponse<ProductivityReportRow>;
 export interface PaymentSummaryResponse extends PaginatedReportResponse<PaymentSummaryRow> {
   note?: string;
+  scope?: string;
 }
 export type InvoiceSummaryResponse = PaginatedReportResponse<InvoiceSummaryRow>;
 

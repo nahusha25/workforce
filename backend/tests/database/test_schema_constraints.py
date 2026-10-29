@@ -103,6 +103,53 @@ def test_refresh_tokens_unique_token_hash(sync_db_session: Session):
         sync_db_session.commit()
     sync_db_session.rollback()
 
+def test_employee_site_assignments_unique_constraint(sync_db_session: Session):
+    u = User(id=uuid.uuid4(), mobile_id="+919999900006", role="employee")
+    sync_db_session.add(u)
+    sync_db_session.commit()
+
+    emp = Employee(
+        id=uuid.uuid4(),
+        user_id=u.id,
+        employee_code="EMP-SYS-ESA",
+        mobile_id="+919999900006",
+        name="ESA Employee",
+    )
+    sync_db_session.add(emp)
+
+    c = Client(id=uuid.uuid4(), name="ESA Client")
+    sync_db_session.add(c)
+    sync_db_session.commit()
+
+    p = Project(id=uuid.uuid4(), client_id=c.id, name="ESA Proj", status="Active")
+    sync_db_session.add(p)
+    sync_db_session.commit()
+
+    s = Site(id=uuid.uuid4(), project_id=p.id, name="ESA Site")
+    sync_db_session.add(s)
+    sync_db_session.commit()
+
+    a1 = EmployeeSiteAssignment(
+        id=uuid.uuid4(),
+        employee_id=emp.id,
+        site_id=s.id,
+        is_active=True,
+    )
+    sync_db_session.add(a1)
+    sync_db_session.commit()
+
+    # Duplicate (employee_id, site_id) must raise IntegrityError
+    a2 = EmployeeSiteAssignment(
+        id=uuid.uuid4(),
+        employee_id=emp.id,
+        site_id=s.id,
+        is_active=False,
+    )
+    sync_db_session.add(a2)
+    with pytest.raises(IntegrityError):
+        sync_db_session.commit()
+    sync_db_session.rollback()
+
 # 2. Foreign Key Integrity Tests
 
 def test_invalid_foreign_keys(sync_db_session: Session):

@@ -49,6 +49,18 @@ export const Sidebar: React.FC = () => {
             >
               Verification
             </NavLink>
+            <NavLink
+              to="/assets"
+              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+            >
+              Assets
+            </NavLink>
+            <NavLink
+              to="/inventory"
+              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+            >
+              Inventory
+            </NavLink>
           </>
         )}
 
@@ -127,6 +139,19 @@ export const Sidebar: React.FC = () => {
               className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
             >
               Reports
+            </NavLink>
+            <div className={styles.sectionTitle}>Finance</div>
+            <NavLink
+              to="/invoices"
+              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+            >
+              Invoices
+            </NavLink>
+            <NavLink
+              to="/employee-payments"
+              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+            >
+              Employee Payments
             </NavLink>
           </>
         )}

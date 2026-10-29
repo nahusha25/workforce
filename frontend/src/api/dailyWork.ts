@@ -19,13 +19,31 @@ export interface WorkOrder {
   is_active: boolean;
 }
 
+export interface CatalogueMaterial {
+  id: string;
+  material_code?: string | null;
+  name: string;
+  description?: string | null;
+  unit_of_measure: string;
+  category: string;
+  purchase_approval_limit: number;
+  is_active: boolean;
+}
+
 export interface WorkPhoto {
   id: string;
   daily_work_entry_id: string;
   image_url: string;
   thumbnail_url?: string | null;
   file_size_bytes?: number | null;
+  photo_type?: 'start_point' | 'end_point' | 'progress' | string | null;
   uploaded_at: string;
+}
+
+export interface WorkMeasurementItem {
+  start_point: string;
+  end_point: string;
+  distance: number;
 }
 
 export interface DailyWorkEntry {
@@ -45,6 +63,7 @@ export interface DailyWorkEntry {
   uom: string;
   status: string;
   remarks?: string | null;
+  measurements?: WorkMeasurementItem[];
   photos?: WorkPhoto[];
   materials?: MaterialTransaction[];
   created_at?: string;
@@ -80,16 +99,22 @@ export interface DailyWorkEntryPayload {
   idempotency_key: string;
   activity_id: string;
   work_order_id?: string | null;
-  quantity: number;
+  quantity?: number;
+  measurements?: WorkMeasurementItem[];
   work_date?: string;
   remarks?: string | null;
+  material_id?: string | null;
+  material_quantity?: number | null;
 }
 
 export interface DailyWorkEntryUpdatePayload {
   activity_id?: string;
   work_order_id?: string | null;
   quantity?: number;
+  measurements?: WorkMeasurementItem[];
   remarks?: string | null;
+  material_id?: string | null;
+  material_quantity?: number | null;
 }
 
 export interface DailyWorkListResponse {
@@ -114,6 +139,14 @@ export const getActivities = async (): Promise<Activity[]> => {
  */
 export const getWorkOrders = async (): Promise<WorkOrder[]> => {
   const response = await apiClient.get<WorkOrder[]>('/daily-work/work-orders');
+  return response.data;
+};
+
+/**
+ * Fetch available materials catalogue for daily work entry
+ */
+export const getMaterialsCatalogue = async (): Promise<CatalogueMaterial[]> => {
+  const response = await apiClient.get<CatalogueMaterial[]>('/daily-work/materials');
   return response.data;
 };
 
@@ -176,17 +209,37 @@ export const getWorkPhotos = async (dailyWorkEntryId: string): Promise<WorkPhoto
 };
 
 /**
- * Upload a progress photo for a daily work entry with upload progress callback
+ * Upload a progress photo for a daily work entry with upload progress callback and optional photo_type
  */
 export const uploadWorkPhoto = async (
   dailyWorkEntryId: string,
   file: File,
-  onProgress?: (percent: number) => void
+  photoTypeOrProgress?: string | ((percent: number) => void),
+  maybeProgress?: (percent: number) => void
 ): Promise<WorkPhoto> => {
+  let photoType: string | undefined;
+  let onProgress: ((percent: number) => void) | undefined;
+
+  if (typeof photoTypeOrProgress === 'function') {
+    onProgress = photoTypeOrProgress;
+    photoType = undefined;
+  } else {
+    photoType = photoTypeOrProgress;
+    onProgress = maybeProgress;
+  }
+
   const formData = new FormData();
   formData.append('file', file);
+  if (photoType) {
+    formData.append('photo_type', photoType);
+  }
+
+  const url = photoType
+    ? `/daily-work/${dailyWorkEntryId}/photos?photo_type=${encodeURIComponent(photoType)}`
+    : `/daily-work/${dailyWorkEntryId}/photos`;
+
   const response = await apiClient.post<WorkPhoto>(
-    `/daily-work/${dailyWorkEntryId}/photos`,
+    url,
     formData,
     {
       headers: {

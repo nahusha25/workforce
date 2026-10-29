@@ -197,6 +197,7 @@ describe('SupervisorVerificationQueuePage', () => {
     // Check metrics
     expect(screen.getByText('₹250.00')).toBeTruthy();
     expect(screen.getAllByText('₹0.00').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('8 hrs').length).toBeGreaterThanOrEqual(1);
 
     // Pending review badge on row 1
     const pendingBadges = screen.getAllByTestId('pending-badge');

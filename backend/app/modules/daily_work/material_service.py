@@ -234,6 +234,23 @@ class MaterialTransactionService:
         else:
             tx_id = uuid.uuid4()
 
+        if material_id:
+            stmt = select(Material).where(Material.id == material_id)
+            res = await session.execute(stmt)
+            mat = res.scalars().first()
+            if not mat:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Material not found in master data",
+                )
+            if not mat.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Selected material is inactive",
+                )
+            if tx_type == "consumed":
+                item_name = mat.name
+
         # Compute is_high_value
         is_high_value, matched_mat = await MaterialTransactionService.compute_high_value(
             session=session,
@@ -243,8 +260,31 @@ class MaterialTransactionService:
             item_name=item_name,
         )
 
-        if matched_mat and material_id is None:
+        if matched_mat and material_id is None and tx_type != "consumed":
             material_id = matched_mat.id
+
+        # Avoid creating duplicate consumed material transactions (Requirement 5)
+        if tx_type == "consumed":
+            stmt_existing = select(MaterialTransaction).where(
+                MaterialTransaction.daily_work_entry_id == entry.id,
+                MaterialTransaction.transaction_type == "consumed",
+            )
+            if material_id:
+                stmt_existing = stmt_existing.where(MaterialTransaction.material_id == material_id)
+            else:
+                stmt_existing = stmt_existing.where(MaterialTransaction.item_name == item_name)
+            res_existing = await session.execute(stmt_existing)
+            existing_tx = res_existing.scalars().first()
+            if existing_tx:
+                existing_tx.quantity = quantity
+                existing_tx.amount = amount
+                existing_tx.is_high_value = is_high_value
+                if bill_image_url:
+                    existing_tx.bill_image_url = bill_image_url
+                existing_tx.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+                await session.refresh(existing_tx)
+                return existing_tx
 
         tx = MaterialTransaction(
             id=tx_id,
@@ -525,6 +565,23 @@ class MaterialTransactionService:
         if "bill_image_url" in data_dict and data_dict["bill_image_url"] is not None:
             tx.bill_image_url = data_dict["bill_image_url"]
 
+        if tx.material_id:
+            stmt = select(Material).where(Material.id == tx.material_id)
+            res = await session.execute(stmt)
+            mat = res.scalars().first()
+            if not mat:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Material not found in master data",
+                )
+            if not mat.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Selected material is inactive",
+                )
+            if tx.transaction_type == "consumed":
+                tx.item_name = mat.name
+
         # Recompute is_high_value
         is_high_value, matched_mat = await MaterialTransactionService.compute_high_value(
             session=session,
@@ -533,7 +590,7 @@ class MaterialTransactionService:
             material_id=tx.material_id,
             item_name=tx.item_name,
         )
-        if matched_mat and tx.material_id is None:
+        if matched_mat and tx.material_id is None and tx.transaction_type != "consumed":
             tx.material_id = matched_mat.id
         tx.is_high_value = is_high_value
 

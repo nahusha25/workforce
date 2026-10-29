@@ -38,10 +38,18 @@ async def create_employee(
 async def list_employees(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
+    is_active: bool | None = Query(None),
+    classification: str | None = Query(None),
     service: EmployeeService = Depends(get_employee_service),
     current_user: User = Depends(require_role(["administrator", "director", "supervisor"])),
 ):
-    return await service.get_employees(current_user=current_user, skip=skip, limit=limit)
+    return await service.get_employees(
+        current_user=current_user,
+        skip=skip,
+        limit=limit,
+        is_active=is_active,
+        classification=classification,
+    )
 
 
 # EMP-005: Get own profile (must be defined before /{id})
@@ -92,5 +100,4 @@ async def delete_employee(
     service: EmployeeService = Depends(get_employee_service),
     current_user: User = Depends(require_role(["administrator"])),
 ):
-    await service.delete_employee(employee_id=id, admin_user=current_user)
-    return {"status": "success", "message": "Employee deleted successfully"}
+    return await service.delete_employee(employee_id=id, admin_user=current_user)

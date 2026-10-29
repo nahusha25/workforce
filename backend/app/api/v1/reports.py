@@ -8,7 +8,7 @@ import io
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,7 +38,7 @@ router = APIRouter()
 @router.get(
     "/attendance",
     response_model=AttendanceReportResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     summary="Approved attendance history report (DSH-002)",
 )
 async def get_attendance_report(
@@ -65,7 +65,7 @@ async def get_attendance_report(
 @router.get(
     "/work",
     response_model=WorkReportResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     summary="Approved daily work progress report (DSH-003)",
 )
 async def get_work_report(
@@ -94,7 +94,7 @@ async def get_work_report(
 @router.get(
     "/materials",
     response_model=MaterialsReportResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     summary="Material transactions report (DSH-004)",
 )
 async def get_materials_report(
@@ -125,7 +125,7 @@ async def get_materials_report(
 @router.get(
     "/productivity",
     response_model=ProductivityReportResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     summary="Employee productivity report with category breakdown (DSH-005)",
 )
 async def get_productivity_report(
@@ -152,27 +152,34 @@ async def get_productivity_report(
 @router.get(
     "/payment-summary",
     response_model=PaymentSummaryResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     summary="Weekly estimated payment preview using effective rates (DSH-006)",
 )
 @router.get(
     "/payment",
     response_model=PaymentSummaryResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     include_in_schema=False,
 )
 async def get_payment_summary_report(
     filters: DashboardFilters = Depends(get_dashboard_filters),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=200, description="Items per page"),
+    scope: str = Query("all", description="Report scope: 'all' or 'unbilled_only'"),
     current_user: User = Depends(require_role(["director", "administrator"])),
     db: AsyncSession = Depends(get_db),
 ) -> PaymentSummaryResponse:
+    if scope not in ("all", "unbilled_only"):
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Scope must be either 'all' or 'unbilled_only'.",
+        )
     return await DashboardService.get_payment_summary_report(
         session=db,
         f=filters,
         page=page,
         page_size=page_size,
+        scope=scope,
     )
 
 
@@ -183,7 +190,7 @@ async def get_payment_summary_report(
 @router.get(
     "/invoice-summary",
     response_model=InvoiceSummaryResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     summary="Client & site aggregated invoice summary (DSH-007)",
 )
 async def get_invoice_summary_report(
@@ -220,6 +227,7 @@ async def export_report_endpoint(
     transaction_type: Optional[str] = Query(None),
     is_high_value: Optional[bool] = Query(None),
     sort_category: Optional[str] = Query(None),
+    scope: str = Query("all", description="Scope: 'all' or 'unbilled_only'"),
     current_user: User = Depends(require_role(["director", "administrator"])),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
@@ -227,6 +235,11 @@ async def export_report_endpoint(
     Streams an in-memory generated Excel (.xlsx) or PDF (.pdf) file.
     Does not write temporary files to disk.
     """
+    if scope not in ("all", "unbilled_only"):
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Scope must be either 'all' or 'unbilled_only'.",
+        )
     buf, media_type, filename = await export_report(
         session=db,
         report_type=report_type,
@@ -238,6 +251,7 @@ async def export_report_endpoint(
         transaction_type=transaction_type,
         is_high_value=is_high_value,
         sort_category=sort_category,
+        scope=scope,
     )
 
     return StreamingResponse(

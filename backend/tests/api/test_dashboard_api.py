@@ -375,6 +375,25 @@ class TestReportEndpointsAPI:
         assert resp.status_code == 200
         data = resp.json()
         assert "data" in data
+        assert data.get("scope") == "all"
+
+    def test_get_payment_summary_scope_unbilled_only_200(self, client: TestClient, api_setup):
+        resp = client.get(
+            "/api/v1/reports/payment-summary?date_from=2025-08-01&date_to=2025-08-31&scope=unbilled_only",
+            headers=api_setup["dir_headers"],
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "data" in data
+        assert data.get("scope") == "unbilled_only"
+
+    def test_get_payment_summary_invalid_scope_returns_422(self, client: TestClient, api_setup):
+        resp = client.get(
+            "/api/v1/reports/payment-summary?date_from=2025-08-01&date_to=2025-08-31&scope=invalid_scope",
+            headers=api_setup["dir_headers"],
+        )
+        assert resp.status_code == 422
+        assert "Scope must be either 'all' or 'unbilled_only'" in resp.text
 
     def test_get_invoice_summary_report_200(self, client: TestClient, api_setup):
         resp = client.get(
@@ -475,6 +494,23 @@ class TestReportExportAPI:
         assert resp.status_code == 422
         assert "Invalid format" in resp.text
 
+    def test_export_payment_summary_scope_unbilled_only_xlsx(self, client: TestClient, api_setup):
+        resp = client.get(
+            "/api/v1/reports/payment-summary/export?format=xlsx&date_from=2025-08-01&date_to=2025-08-31&scope=unbilled_only",
+            headers=api_setup["dir_headers"],
+        )
+        assert resp.status_code == 200
+        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers["content-type"]
+        assert len(resp.content) > 1000
+
+    def test_export_invalid_scope_returns_422(self, client: TestClient, api_setup):
+        resp = client.get(
+            "/api/v1/reports/payment-summary/export?format=xlsx&date_from=2025-08-01&date_to=2025-08-31&scope=invalid_scope",
+            headers=api_setup["dir_headers"],
+        )
+        assert resp.status_code == 422
+        assert "Scope must be either 'all' or 'unbilled_only'" in resp.text
+
     def test_export_currency_formatting_two_decimal_places(self, client: TestClient, api_setup):
         """
         Confirms currency values in Excel exports use consistent 2-decimal-place precision
@@ -521,4 +557,63 @@ class TestReportExportAPI:
                 assert re.match(r"^\d+\.\d{2}$", gross_val), f"Gross '{gross_val}' does not match 2 decimal places"
                 rate_found = True
         assert rate_found, "Payment summary rate/gross was not found in export"
+
+
+class TestMaterialReportingDateConsistencyRegression:
+    """D-2 Regression Tests: Parent DailyWorkEntry.work_date governs material transactions."""
+
+    def test_material_reporting_uses_parent_work_date_regression(
+        self, client: TestClient, api_setup, sync_db_session: Session
+    ):
+        site = api_setup["site"]
+        emp = api_setup["employee"]
+        sfx = uuid.uuid4().hex[:8]
+
+        # Attendance record for 2025-08-15
+        att = AttendanceRecord(
+            id=_u(), employee_id=emp.id, site_id=site.id,
+            date=date(2025, 8, 15), working_hours=Decimal("8"), overtime_hours=Decimal("0"),
+            status="approved",
+        )
+        sync_db_session.add(att)
+        sync_db_session.commit()
+
+        # DWE with work_date in August 2025
+        dwe = DailyWorkEntry(
+            id=_u(), idempotency_key=f"ik-api-dwe-{sfx}",
+            attendance_record_id=att.id, employee_id=emp.id,
+            site_id=site.id, activity_id=sync_db_session.query(Activity).first().id,
+            work_date=date(2025, 8, 15), quantity=Decimal("100"), uom="metres", status="approved",
+        )
+        sync_db_session.add(dwe)
+        sync_db_session.commit()
+
+        # MaterialTransaction with created_at in October 2025
+        mt_future = MaterialTransaction(
+            id=_u(), daily_work_entry_id=dwe.id, site_id=site.id, transaction_type="purchased",
+            item_name=f"FiberCable-{sfx}", quantity=Decimal("5"), amount=Decimal("5500.00"),
+            is_high_value=False, status="approved",
+            created_at=datetime(2025, 10, 15, 12, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2025, 10, 15, 12, 0, 0, tzinfo=timezone.utc),
+        )
+        sync_db_session.add(mt_future)
+        sync_db_session.commit()
+
+        # 1. Check reports/materials for August 2025
+        resp_rep = client.get(
+            f"/api/v1/reports/materials?date_from=2025-08-01&date_to=2025-08-31&site_id={site.id}",
+            headers=api_setup["dir_headers"],
+        )
+        assert resp_rep.status_code == 200
+        items = [r["item_name"] for r in resp_rep.json()["data"]]
+        assert f"FiberCable-{sfx}" in items
+
+        # 2. Check dashboard/metrics for August 2025
+        resp_met = client.get(
+            f"/api/v1/dashboard/metrics?date_from=2025-08-01&date_to=2025-08-31&site_id={site.id}",
+            headers=api_setup["dir_headers"],
+        )
+        assert resp_met.status_code == 200
+        # Baseline was 2400.00, with FiberCable should be 7900.00
+        assert resp_met.json()["material_cost"]["total_amount"] == "7900.00"
 

@@ -11,14 +11,21 @@ import {
   createDailyWorkEntry,
   updateDailyWorkEntry,
   submitDailyWorkEntry,
+  getMaterialsCatalogue,
   type Activity,
   type WorkOrder,
   type DailyWorkEntry,
   type WorkPhoto,
   type MaterialTransaction,
+  type CatalogueMaterial,
 } from '../api/dailyWork';
 import { WorkPhotoCapture } from '../components/WorkPhotoCapture';
 import { MaterialTransactionEntry } from '../components/MaterialTransactionEntry';
+import {
+  isMatchingConsumedMaterial,
+  isDistanceUom,
+  getActivityUnitDisplay,
+} from '../utils/materialMapping';
 import { getAttendanceRecords, type AttendanceRecord } from '../api/attendance';
 import { AuthContext } from '../context/AuthContext';
 import { normalizeError } from '../api/client';
@@ -56,12 +63,68 @@ export const generateClientUuid = (): string => {
   });
 };
 
+export interface MeasurementRow {
+  tempId: string;
+  startPoint: string;
+  endPoint: string;
+  distance: number | '';
+}
+
+export const createEmptyMeasurementRow = (
+  startPoint = '',
+  endPoint = '',
+  distance: number | '' = ''
+): MeasurementRow => ({
+  tempId: generateClientUuid(),
+  startPoint,
+  endPoint,
+  distance,
+});
+
+export const formatTotalDistance = (val: number | string | '' | null | undefined): string => {
+  if (val === null || val === undefined || val === '') return '0.00';
+  const num = Number(val);
+  return isNaN(num) ? '0.00' : num.toFixed(2);
+};
+
+export const syncLineMaterialsWithMeasurement = (
+  currentMaterials: MaterialTransaction[],
+  activityId: string,
+  newTotal: number,
+  allActivities: Activity[],
+  allCatalogueMaterials: CatalogueMaterial[],
+  _ownerId?: string
+): MaterialTransaction[] => {
+  const activity = allActivities.find((a) => a.id === activityId);
+  if (!activity) return currentMaterials;
+
+  // Check if there is already a matching consumed material transaction
+  const hasMatching = currentMaterials.some((tx) =>
+    isMatchingConsumedMaterial(tx, activity, allCatalogueMaterials)
+  );
+
+  if (hasMatching) {
+    return currentMaterials.map((tx) => {
+      if (isMatchingConsumedMaterial(tx, activity, allCatalogueMaterials)) {
+        return {
+          ...tx,
+          quantity: newTotal,
+        };
+      }
+      return tx;
+    });
+  }
+
+  return currentMaterials;
+};
+
 export interface LocalDailyWorkLineDraft {
   id?: string;
   idempotencyKey: string;
   activityId: string;
   workOrderId?: string;
-  quantity: number;
+  measurements?: { startPoint: string; endPoint: string; distance: number | '' }[];
+  quantity?: number;
   remarks?: string;
 }
 
@@ -78,6 +141,7 @@ export interface ActivityLineItem {
   idempotencyKey: string;
   activityId: string;
   workOrderId: string;
+  measurements: MeasurementRow[];
   quantity: number | '';
   uom: string;
   remarks: string;
@@ -93,6 +157,19 @@ export interface DailyWorkEntryPageProps {
   debounceMs?: number;
 }
 
+export const dedupePhotos = (photos?: WorkPhoto[] | null): WorkPhoto[] => {
+  if (!photos || !Array.isArray(photos)) return [];
+  const seen = new Set<string>();
+  const result: WorkPhoto[] = [];
+  for (const p of photos) {
+    if (p && p.id && !seen.has(p.id)) {
+      seen.add(p.id);
+      result.push(p);
+    }
+  }
+  return result;
+};
+
 export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
   employeeId,
   debounceMs = 1000,
@@ -107,6 +184,7 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
   const [activities, setActivities] = useState<Activity[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord | null>(null);
+  const [catalogueMaterials, setCatalogueMaterials] = useState<CatalogueMaterial[]>([]);
 
   // Multi-Activity Line Items State
   const [lineItems, setLineItems] = useState<ActivityLineItem[]>([]);
@@ -151,6 +229,7 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
         idempotencyKey: generateClientUuid(),
         activityId: defaultAct ? defaultAct.id : '',
         workOrderId: '',
+        measurements: [createEmptyMeasurementRow('P1', 'P2')],
         quantity: 0,
         uom: defaultAct ? defaultAct.unit_of_measure : '',
         remarks: '',
@@ -166,7 +245,19 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
 
   const allLinesValidQuantity = useMemo(() => {
     if (lineItems.length === 0) return false;
-    return lineItems.every((it) => Boolean(it.activityId) && Number(it.quantity) > 0);
+    return lineItems.every(
+      (it) =>
+        Boolean(it.activityId) &&
+        it.measurements &&
+        it.measurements.length > 0 &&
+        it.measurements.every(
+          (m) =>
+            Boolean(String(m.startPoint || '').trim()) &&
+            Boolean(String(m.endPoint || '').trim()) &&
+            Number(m.distance) > 0
+        ) &&
+        Number(it.quantity) > 0
+    );
   }, [lineItems]);
 
   const isReadOnly = useMemo(() => {
@@ -189,41 +280,88 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
     setLoading(true);
     setErrorMsg(null);
     try {
-      const [acts, wos, attList, entries] = await Promise.all([
+      const [acts, wos, attList, entries, cats] = await Promise.all([
         getActivities().catch(() => [] as Activity[]),
         getWorkOrders().catch(() => [] as WorkOrder[]),
         getAttendanceRecords(today).catch(() => [] as AttendanceRecord[]),
         getDailyWorkEntries(today).catch(() => [] as DailyWorkEntry[]),
+        getMaterialsCatalogue().catch(() => [] as CatalogueMaterial[]),
       ]);
 
       setActivities(acts);
       setWorkOrders(wos);
+      setCatalogueMaterials(cats);
 
+      let currentSession: AttendanceRecord | null = null;
       if (attList.length > 0) {
         const sorted = [...attList].sort(
           (a, b) => new Date(b.check_in_time).getTime() - new Date(a.check_in_time).getTime()
         );
-        setAttendance(sorted[0]);
+        // Identify active attendance session (check_out_time === null); fallback to latest
+        const active = sorted.find((a) => a.check_out_time === null);
+        currentSession = active || sorted[0];
+        setAttendance(currentSession);
       } else {
         setAttendance(null);
       }
 
-      // Check for existing work entries from server
-      if (entries.length > 0) {
-        const mappedLines: ActivityLineItem[] = entries.map((entry) => {
+      // Filter entries by matching attendance session ID
+      const sessionEntries = currentSession
+        ? entries.filter(
+            (entry) =>
+              entry.attendance_record_id === currentSession.id ||
+              (!entry.attendance_record_id && attList.length <= 1)
+          )
+        : entries;
+
+      // Check for existing work entries from server for this session
+      if (sessionEntries.length > 0) {
+        const mappedLines: ActivityLineItem[] = sessionEntries.map((entry) => {
           const matchedAct = acts.find((a) => a.id === entry.activity_id);
+          const rawMeasurements = (entry as any).measurements;
+          const measurements: MeasurementRow[] =
+            Array.isArray(rawMeasurements) && rawMeasurements.length > 0
+              ? rawMeasurements.map((m: any) => ({
+                  tempId: generateClientUuid(),
+                  startPoint: m.start_point || '',
+                  endPoint: m.end_point || '',
+                  distance: m.distance !== undefined && m.distance !== null ? m.distance : '',
+                }))
+              : [
+                  createEmptyMeasurementRow(
+                    'P1',
+                    'P2',
+                    Number(entry.quantity) > 0 ? Number(entry.quantity) : ''
+                  ),
+                ];
+
+          const totalDistance = measurements.reduce(
+            (acc, m) => acc + (Number(m.distance) || 0),
+            0
+          );
+          const totalQty = totalDistance || Number(entry.quantity) || 0;
+          const syncedMaterials = syncLineMaterialsWithMeasurement(
+            entry.materials || [],
+            entry.activity_id,
+            totalQty,
+            acts,
+            cats,
+            entry.id
+          );
+
           return {
             id: entry.id,
             tempId: entry.id,
             idempotencyKey: entry.idempotency_key || entry.id,
             activityId: entry.activity_id,
             workOrderId: entry.work_order_id || '',
-            quantity: Number(entry.quantity) || 0,
+            measurements,
+            quantity: totalQty,
             uom: entry.uom || (matchedAct ? matchedAct.unit_of_measure : ''),
             remarks: entry.remarks || '',
             status: entry.status,
-            photos: entry.photos || [],
-            materials: entry.materials || [],
+            photos: dedupePhotos(entry.photos),
+            materials: syncedMaterials,
             saveError: null,
             expandedAttachments: false,
           };
@@ -255,12 +393,12 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
             parsed.date === today &&
             parsed.items.length > 0
           ) {
-            const latestServerTime = entries.reduce((maxT, e) => {
+            const latestServerTime = sessionEntries.reduce((maxT, e) => {
               const t = new Date(e.updated_at || e.created_at || 0).getTime();
               return t > maxT ? t : maxT;
             }, 0);
 
-            if (entries.length === 0 || (parsed.savedAt && parsed.savedAt > latestServerTime)) {
+            if (sessionEntries.length === 0 || (parsed.savedAt && parsed.savedAt > latestServerTime)) {
               setPendingRestoreDraft(parsed as LocalDailyWorkDraft);
             }
           }
@@ -300,6 +438,11 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
             idempotencyKey: it.idempotencyKey,
             activityId: it.activityId,
             workOrderId: it.workOrderId || undefined,
+            measurements: it.measurements.map((m) => ({
+              startPoint: m.startPoint,
+              endPoint: m.endPoint,
+              distance: m.distance,
+            })),
             quantity: Number(it.quantity) || 0,
             remarks: it.remarks || undefined,
           })),
@@ -328,13 +471,35 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
 
     const restoredLines: ActivityLineItem[] = pendingRestoreDraft.items.map((item) => {
       const matchedAct = activities.find((a) => a.id === item.activityId);
+      const measurements: MeasurementRow[] =
+        Array.isArray(item.measurements) && item.measurements.length > 0
+          ? item.measurements.map((m) => ({
+              tempId: generateClientUuid(),
+              startPoint: m.startPoint || '',
+              endPoint: m.endPoint || '',
+              distance: m.distance !== undefined && m.distance !== null ? m.distance : '',
+            }))
+          : [
+              createEmptyMeasurementRow(
+                'P1',
+                'P2',
+                Number(item.quantity) > 0 ? Number(item.quantity) : ''
+              ),
+            ];
+
+      const totalDistance = measurements.reduce(
+        (acc, m) => acc + (Number(m.distance) || 0),
+        0
+      );
+
       return {
         id: item.id,
         tempId: item.id || item.idempotencyKey || generateClientUuid(),
         idempotencyKey: item.idempotencyKey || generateClientUuid(),
         activityId: item.activityId,
         workOrderId: item.workOrderId || '',
-        quantity: item.quantity ?? 0,
+        measurements,
+        quantity: totalDistance || Number(item.quantity) || 0,
         uom: matchedAct ? matchedAct.unit_of_measure : '',
         remarks: item.remarks || '',
         status: 'draft',
@@ -369,6 +534,15 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
       if (field === 'activityId') {
         const act = activities.find((a) => a.id === value);
         line.uom = act ? act.unit_of_measure : '';
+        const currentTotal = (line.measurements || []).reduce((sum, r) => sum + (Number(r.distance) || 0), 0);
+        line.materials = syncLineMaterialsWithMeasurement(
+          line.materials || [],
+          value,
+          currentTotal,
+          activities,
+          catalogueMaterials,
+          line.id || line.tempId
+        );
       }
       next[index] = line;
       return next;
@@ -397,35 +571,170 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
     });
   };
 
-  // Refinement 1 & 2: Save a single line item with error tracking and retry capability
-  const saveSingleLineItem = async (index: number): Promise<boolean> => {
+  const addMeasurementRow = (lineIndex: number) => {
+    setLineItems((prev) => {
+      const next = [...prev];
+      if (!next[lineIndex]) return prev;
+      const line = { ...next[lineIndex] };
+      const currentRows = [...line.measurements];
+      const lastRow = currentRows[currentRows.length - 1];
+      const nextStart = lastRow && lastRow.endPoint.trim() ? lastRow.endPoint.trim() : '';
+      let nextEnd = '';
+      if (nextStart.match(/^P(\d+)$/i)) {
+        const num = parseInt(nextStart.slice(1), 10);
+        nextEnd = `P${num + 1}`;
+      }
+      currentRows.push(createEmptyMeasurementRow(nextStart, nextEnd));
+      line.measurements = currentRows;
+      const newTotal = currentRows.reduce((sum, r) => sum + (Number(r.distance) || 0), 0);
+      line.quantity = newTotal;
+      line.materials = syncLineMaterialsWithMeasurement(
+        line.materials || [],
+        line.activityId,
+        newTotal,
+        activities,
+        catalogueMaterials,
+        line.id || line.tempId
+      );
+      line.saveError = null;
+      next[lineIndex] = line;
+      return next;
+    });
+  };
+
+  const removeMeasurementRow = (lineIndex: number, rowIndex: number) => {
+    setLineItems((prev) => {
+      const next = [...prev];
+      if (!next[lineIndex]) return prev;
+      const line = { ...next[lineIndex] };
+      if (line.measurements.length <= 1) return prev;
+      const currentRows = line.measurements.filter((_, idx) => idx !== rowIndex);
+      line.measurements = currentRows;
+      const newTotal = currentRows.reduce((sum, r) => sum + (Number(r.distance) || 0), 0);
+      line.quantity = newTotal;
+      line.materials = syncLineMaterialsWithMeasurement(
+        line.materials || [],
+        line.activityId,
+        newTotal,
+        activities,
+        catalogueMaterials,
+        line.id || line.tempId
+      );
+      line.saveError = null;
+      next[lineIndex] = line;
+      return next;
+    });
+  };
+
+  const updateMeasurementField = (
+    lineIndex: number,
+    rowIndex: number,
+    field: 'startPoint' | 'endPoint' | 'distance',
+    value: any
+  ) => {
+    setLineItems((prev) => {
+      const next = [...prev];
+      if (!next[lineIndex]) return prev;
+      const line = { ...next[lineIndex] };
+      const currentRows = [...line.measurements];
+      currentRows[rowIndex] = { ...currentRows[rowIndex], [field]: value };
+      line.measurements = currentRows;
+      const newTotal = currentRows.reduce((sum, r) => sum + (Number(r.distance) || 0), 0);
+      line.quantity = newTotal;
+      line.materials = syncLineMaterialsWithMeasurement(
+        line.materials || [],
+        line.activityId,
+        newTotal,
+        activities,
+        catalogueMaterials,
+        line.id || line.tempId
+      );
+      line.saveError = null;
+      next[lineIndex] = line;
+      return next;
+    });
+  };
+
+  // Save a single line item with point-to-point measurements and total quantity
+  const saveSingleLineItem = async (index: number): Promise<{ id: string; status: string } | null> => {
     const line = lineItems[index];
     if (!line.activityId) {
       updateLineField(index, 'saveError', 'Please select an activity.');
-      return false;
+      return null;
     }
 
-    const qty = Number(line.quantity) || 0;
-    if (qty < 0) {
-      updateLineField(index, 'saveError', 'Quantity must be non-negative.');
-      return false;
+    if (!line.measurements || line.measurements.length === 0) {
+      updateLineField(index, 'saveError', 'At least one measurement row is required.');
+      return null;
     }
+
+    for (let r = 0; r < line.measurements.length; r++) {
+      const row = line.measurements[r];
+      const startP = String(row.startPoint || '').trim();
+      const endP = String(row.endPoint || '').trim();
+      const dist = Number(row.distance);
+
+      if (!startP) {
+        updateLineField(index, 'saveError', `Measurement row #${r + 1}: Start Point is required.`);
+        return null;
+      }
+      if (!endP) {
+        updateLineField(index, 'saveError', `Measurement row #${r + 1}: End Point is required.`);
+        return null;
+      }
+      if (isNaN(dist) || dist <= 0) {
+        updateLineField(index, 'saveError', `Measurement row #${r + 1}: Distance must be a positive number greater than 0.`);
+        return null;
+      }
+    }
+
+    const totalQty = line.measurements.reduce((acc, m) => acc + Number(m.distance), 0);
+    if (totalQty <= 0) {
+      updateLineField(index, 'saveError', 'Total distance must be greater than zero.');
+      return null;
+    }
+
+    const payloadMeasurements = line.measurements.map((m) => ({
+      start_point: m.startPoint.trim(),
+      end_point: m.endPoint.trim(),
+      distance: Number(m.distance),
+    }));
+
+    const matchedAct = activities.find((a) => a.id === line.activityId);
+    const matchingTx = (line.materials || []).find((tx) =>
+      isMatchingConsumedMaterial(tx, matchedAct, catalogueMaterials)
+    );
+    const mappedMaterialId = matchingTx ? (matchingTx.material_id || undefined) : undefined;
+    const mappedMaterialQuantity = matchingTx ? totalQty : undefined;
 
     try {
+      let savedId = line.id;
+      let savedStatus = line.status;
+
       if (line.id) {
         const updated = await updateDailyWorkEntry(line.id, {
           activity_id: line.activityId,
           work_order_id: line.workOrderId || null,
-          quantity: qty,
+          quantity: totalQty,
+          measurements: payloadMeasurements,
+          material_id: mappedMaterialId,
+          material_quantity: mappedMaterialQuantity,
           remarks: line.remarks.trim() || null,
         });
 
+        savedId = updated.id;
+        savedStatus = updated.status;
+
         setLineItems((prev) => {
           const next = [...prev];
+          if (!next[index]) return prev;
+          const currentPhotos = next[index].photos || [];
+          const incomingPhotos = updated.photos && updated.photos.length > 0 ? updated.photos : currentPhotos;
           next[index] = {
             ...next[index],
             status: updated.status,
-            photos: updated.photos || next[index].photos,
+            quantity: Number(updated.quantity) || totalQty,
+            photos: dedupePhotos([...incomingPhotos, ...currentPhotos]),
             materials: updated.materials || next[index].materials,
             saveError: null,
           };
@@ -436,30 +745,40 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
           idempotency_key: line.idempotencyKey,
           activity_id: line.activityId,
           work_order_id: line.workOrderId || null,
-          quantity: qty,
+          quantity: totalQty,
+          measurements: payloadMeasurements,
+          material_id: mappedMaterialId,
+          material_quantity: mappedMaterialQuantity,
           work_date: today,
           remarks: line.remarks.trim() || null,
         });
 
+        savedId = created.id;
+        savedStatus = created.status;
+
         setLineItems((prev) => {
           const next = [...prev];
+          if (!next[index]) return prev;
+          const currentPhotos = next[index].photos || [];
+          const incomingPhotos = created.photos && created.photos.length > 0 ? created.photos : currentPhotos;
           next[index] = {
             ...next[index],
             id: created.id,
             status: created.status,
-            photos: created.photos || [],
-            materials: created.materials || [],
+            quantity: Number(created.quantity) || totalQty,
+            photos: dedupePhotos([...incomingPhotos, ...currentPhotos]),
+            materials: created.materials && created.materials.length > 0 ? created.materials : next[index].materials,
             saveError: null,
           };
           return next;
         });
       }
-      return true;
+      return { id: savedId, status: savedStatus };
     } catch (err: any) {
       const norm = normalizeError(err as AxiosError<any>);
       const msg = norm.message || 'Failed to save activity line.';
       updateLineField(index, 'saveError', msg);
-      return false;
+      return null;
     }
   };
 
@@ -520,9 +839,24 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
       return;
     }
 
+    const hasInvalidMeasurement = lineItems.some((line) => {
+      if (!line.measurements || line.measurements.length === 0) return true;
+      return line.measurements.some(
+        (m) =>
+          !String(m.startPoint || '').trim() ||
+          !String(m.endPoint || '').trim() ||
+          Number(m.distance) <= 0 ||
+          isNaN(Number(m.distance))
+      );
+    });
+    if (hasInvalidMeasurement) {
+      setErrorMsg('Cannot submit: All measurement rows must have valid start points, end points, and positive distances.');
+      return;
+    }
+
     const hasZeroQuantity = lineItems.some((it) => (Number(it.quantity) || 0) <= 0);
     if (hasZeroQuantity) {
-      setErrorMsg('Cannot submit: All activity lines must have a quantity greater than zero.');
+      setErrorMsg('Cannot submit: All activity lines must have a total distance greater than zero.');
       return;
     }
 
@@ -536,11 +870,14 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
 
     try {
       // Step 1: Ensure all line items are saved first
+      const savedLines: { id: string; status: string }[] = [];
       let saveFailed = false;
       for (let i = 0; i < lineItems.length; i++) {
-        const ok = await saveSingleLineItem(i);
-        if (!ok) {
+        const saved = await saveSingleLineItem(i);
+        if (!saved) {
           saveFailed = true;
+        } else {
+          savedLines.push(saved);
         }
       }
 
@@ -552,8 +889,8 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
       }
 
       // Step 2: Submit all line items
-      for (let i = 0; i < lineItems.length; i++) {
-        const item = lineItems[i];
+      for (let i = 0; i < savedLines.length; i++) {
+        const item = savedLines[i];
         if (item.id && (item.status === 'draft' || item.status === 'correction_required')) {
           await submitDailyWorkEntry(item.id);
         }
@@ -677,6 +1014,9 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
           {lineItems.map((line, index) => {
             const matchedAct = activities.find((a) => a.id === line.activityId);
             const lineReadOnly = line.status === 'submitted' || line.status === 'approved';
+            const rawUom = line.uom || (matchedAct ? matchedAct.unit_of_measure : 'metres');
+            const unitDisplay = getActivityUnitDisplay(rawUom);
+            const isDistance = isDistanceUom(unitDisplay);
 
             return (
               <div
@@ -718,32 +1058,6 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
                     />
                   </div>
 
-                  {/* Quantity and Auto-derived UOM */}
-                  <div className={styles.quantityGroup}>
-                    <label htmlFor={`quantity-input-${index}`}>
-                      Quantity *
-                    </label>
-                    <div className={styles.quantityInputRow}>
-                      <input
-                        id={`quantity-input-${index}`}
-                        type="number"
-                        min="0"
-                        step="any"
-                        className={styles.quantityInput}
-                        value={line.quantity}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          updateLineField(index, 'quantity', val === '' ? '' : parseFloat(val));
-                        }}
-                        placeholder="0.0"
-                        disabled={isReadOnly || lineReadOnly}
-                      />
-                      <span className={styles.uomBadge} title="Auto-derived Unit of Measure">
-                        {line.uom || (matchedAct ? matchedAct.unit_of_measure : '—')}
-                      </span>
-                    </div>
-                  </div>
-
                   {/* Work Order Selector */}
                   <div>
                     <Select
@@ -754,6 +1068,127 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
                       disabled={isReadOnly || lineReadOnly}
                     />
                   </div>
+                </div>
+
+                {/* Point-to-Point Measurement Table */}
+                <div className={styles.measurementsSection}>
+                  <div className={styles.measurementsHeader}>
+                    <h4 className={styles.measurementsTitle}>Work Measurements (Point-to-Point)</h4>
+                    <span className={styles.measurementsSubtitle} data-testid={`measurements-help-${index}`}>
+                      Record start/end points and {isDistance ? 'distance' : 'quantity'} in {unitDisplay}. The total {isDistance ? 'distance' : 'quantity'} automatically derives the activity quantity.
+                    </span>
+                  </div>
+
+                  <div className={styles.tableResponsive}>
+                    <table className={styles.measurementsTable}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '40px' }}>#</th>
+                          <th style={{ minWidth: '130px' }}>Start Point *</th>
+                          <th style={{ minWidth: '130px' }}>End Point *</th>
+                          <th style={{ minWidth: '130px', textAlign: 'right' }} data-testid={`measurement-header-unit-${index}`}>
+                            {isDistance ? `Distance (${unitDisplay})` : `Quantity (${unitDisplay})`} *
+                          </th>
+                          {!isReadOnly && !lineReadOnly && <th style={{ width: '50px' }}></th>}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {line.measurements.map((row, rIdx) => (
+                          <tr key={rIdx}>
+                            <td>{rIdx + 1}</td>
+                            <td>
+                              <input
+                                type="text"
+                                className={styles.pointInput}
+                                placeholder="e.g. P1"
+                                aria-label={`Start Point #${rIdx + 1} for Activity #${index + 1}`}
+                                value={row.startPoint}
+                                onChange={(e) => updateMeasurementField(index, rIdx, 'startPoint', e.target.value)}
+                                disabled={isReadOnly || lineReadOnly}
+                                data-testid={`measurement-start-${index}-${rIdx}`}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="text"
+                                className={styles.pointInput}
+                                placeholder="e.g. P2"
+                                aria-label={`End Point #${rIdx + 1} for Activity #${index + 1}`}
+                                value={row.endPoint}
+                                onChange={(e) => updateMeasurementField(index, rIdx, 'endPoint', e.target.value)}
+                                disabled={isReadOnly || lineReadOnly}
+                                data-testid={`measurement-end-${index}-${rIdx}`}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                className={styles.distanceInput}
+                                placeholder="0.0"
+                                aria-label={`${isDistance ? 'Distance' : 'Quantity'} #${rIdx + 1} for Activity #${index + 1}`}
+                                value={row.distance}
+                                onChange={(e) => updateMeasurementField(index, rIdx, 'distance', e.target.value)}
+                                disabled={isReadOnly || lineReadOnly}
+                                data-testid={`measurement-dist-${index}-${rIdx}`}
+                              />
+                            </td>
+                            {!isReadOnly && !lineReadOnly && (
+                              <td style={{ textAlign: 'center' }}>
+                                {line.measurements.length > 1 && (
+                                  <button
+                                    type="button"
+                                    className={styles.removeRowBtn}
+                                    onClick={() => removeMeasurementRow(index, rIdx)}
+                                    title="Remove measurement row"
+                                    aria-label={`Remove measurement row #${rIdx + 1}`}
+                                    data-testid={`measurement-remove-${index}-${rIdx}`}
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                )}
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                        <tr className={styles.totalRow}>
+                          <td colSpan={3} className={styles.totalLabel}>
+                            <strong data-testid={`measurement-total-label-${index}`}>
+                              {isDistance ? 'Total Distance' : 'Total Quantity'}
+                            </strong>
+                          </td>
+                          <td style={{ textAlign: 'right' }} className={styles.totalValue}>
+                            <strong data-testid={`measurement-total-${index}`}>
+                              {formatTotalDistance(line.quantity)} {unitDisplay}
+                            </strong>
+                            <span
+                              className={styles.uomBadge}
+                              style={{ marginLeft: 6, display: 'inline-block' }}
+                              data-testid={`activity-uom-badge-${index}`}
+                            >
+                              {unitDisplay}
+                            </span>
+                          </td>
+                          {!isReadOnly && !lineReadOnly && <td></td>}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {!isReadOnly && !lineReadOnly && (
+                    <div className={styles.addRowContainer}>
+                      <button
+                        type="button"
+                        className={styles.addRowBtn}
+                        onClick={() => addMeasurementRow(index)}
+                        data-testid={`measurement-add-row-${index}`}
+                      >
+                        <Plus size={14} />
+                        Add Measurement Row
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Remarks Row */}
@@ -792,6 +1227,7 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
                     type="button"
                     className={styles.attachmentsToggle}
                     onClick={() => toggleExpandAttachments(index)}
+                    data-testid={`attachments-toggle-${index}`}
                   >
                     <Paperclip size={14} />
                     <span>
@@ -811,21 +1247,32 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
                             onPhotosLoaded={(loadedPhotos) => {
                               setLineItems((prev) => {
                                 const next = [...prev];
-                                if (next[index]) {
-                                  next[index] = {
-                                    ...next[index],
-                                    photos: loadedPhotos,
-                                  };
+                                if (!next[index]) return prev;
+                                const currentPhotos = next[index].photos || [];
+                                const merged = dedupePhotos([...loadedPhotos, ...currentPhotos]);
+                                const currentIds = currentPhotos.map((p) => p.id).join(',');
+                                const nextIds = merged.map((p) => p.id).join(',');
+                                if (currentIds === nextIds) {
+                                  return prev;
                                 }
+                                next[index] = {
+                                  ...next[index],
+                                  photos: merged,
+                                };
                                 return next;
                               });
                             }}
                             onPhotoUploaded={(photo) => {
                               setLineItems((prev) => {
                                 const next = [...prev];
+                                if (!next[index]) return prev;
+                                const currentPhotos = next[index].photos || [];
+                                if (currentPhotos.some((p) => p.id === photo.id)) {
+                                  return prev;
+                                }
                                 next[index] = {
                                   ...next[index],
-                                  photos: [photo, ...next[index].photos],
+                                  photos: dedupePhotos([photo, ...currentPhotos]),
                                 };
                                 return next;
                               });
@@ -833,9 +1280,10 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
                             onPhotoDeleted={(photoId) => {
                               setLineItems((prev) => {
                                 const next = [...prev];
+                                if (!next[index]) return prev;
                                 next[index] = {
                                   ...next[index],
-                                  photos: next[index].photos.filter((p) => p.id !== photoId),
+                                  photos: (next[index].photos || []).filter((p) => p.id !== photoId),
                                 };
                                 return next;
                               });
@@ -845,6 +1293,10 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
                           <MaterialTransactionEntry
                             dailyWorkEntryId={line.id}
                             status={line.status || 'draft'}
+                            siteId={attendance?.site_id || auth?.user?.active_sites?.[0]?.id}
+                            activity={matchedAct}
+                            measurementTotal={Number(line.quantity) || 0}
+                            catalogueMaterialsList={catalogueMaterials}
                             initialMaterials={line.materials}
                             onMaterialsLoaded={(loadedMaterials) => {
                               setLineItems((prev) => {
@@ -861,9 +1313,14 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
                             onMaterialAdded={(tx) => {
                               setLineItems((prev) => {
                                 const next = [...prev];
+                                if (!next[index]) return prev;
+                                const existing = next[index].materials || [];
+                                const updated = existing.some((m) => m.id === tx.id)
+                                  ? existing.map((m) => (m.id === tx.id ? tx : m))
+                                  : [tx, ...existing];
                                 next[index] = {
                                   ...next[index],
-                                  materials: [tx, ...next[index].materials],
+                                  materials: updated,
                                 };
                                 return next;
                               });
@@ -991,13 +1448,19 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
                   <tr>
                     <th>#</th>
                     <th>Activity</th>
-                    <th>Qty &amp; UOM</th>
+                    <th>Measurements</th>
+                    <th>Total Qty</th>
                     <th>Attachments</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lineItems.map((line, idx) => {
                     const act = activities.find((a) => a.id === line.activityId);
+                    const actUom = getActivityUnitDisplay(line.uom || act?.unit_of_measure);
+                    const measurementSpans = line.measurements
+                      .filter((m) => m.startPoint && m.endPoint)
+                      .map((m) => `${m.startPoint}->${m.endPoint} (${m.distance || 0} ${actUom})`)
+                      .join(', ');
                     return (
                       <tr key={line.tempId}>
                         <td>{idx + 1}</td>
@@ -1009,8 +1472,11 @@ export const DailyWorkEntryPage: React.FC<DailyWorkEntryPageProps> = ({
                             </div>
                           )}
                         </td>
+                        <td style={{ fontSize: '0.8rem', color: '#475569' }}>
+                          {measurementSpans || '—'}
+                        </td>
                         <td>
-                          {line.quantity} {line.uom || act?.unit_of_measure}
+                          {line.quantity} {actUom}
                         </td>
                         <td>
                           {line.photos.length} photo(s), {line.materials.length} transaction(s)

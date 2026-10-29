@@ -62,6 +62,7 @@ class WorkPhotoService:
         employee_id: Optional[uuid.UUID] = None,
         is_admin: bool = False,
         storage: Optional[FileStorageService] = None,
+        photo_type: Optional[str] = None,
     ) -> WorkPhoto:
         """Upload a progress photo linked to a daily work entry.
 
@@ -69,10 +70,12 @@ class WorkPhotoService:
         1. Daily work entry exists.
         2. Entry belongs to requesting employee (unless admin).
         3. Entry status is 'draft' or 'correction_required' (rejects submitted/approved/rejected).
-        4. Validates and stores file via file_storage abstraction.
-        5. Generates an organized, collision-safe destination path:
+        4. Validates photo_type if provided (start_point, end_point, progress).
+        5. If photo_type is 'start_point' or 'end_point', replaces any existing photo of the same type.
+        6. Validates and stores file via file_storage abstraction.
+        7. Generates an organized, collision-safe destination path:
            photos/{employee_id}/{date}/{entry_id}/{photo_id}.{ext}
-        6. Persists WorkPhoto record with returned URL.
+        8. Persists WorkPhoto record with returned URL and photo_type.
         """
         stmt = select(DailyWorkEntry).where(DailyWorkEntry.id == daily_work_entry_id)
         result = await session.execute(stmt)
@@ -98,6 +101,15 @@ class WorkPhotoService:
                 detail=f"Cannot upload photo for entry with status '{entry.status}'. Only draft and correction_required entries can receive photos.",
             )
 
+        # Validate photo_type
+        if photo_type is not None:
+            photo_type = photo_type.strip().lower()
+            if photo_type not in ("start_point", "end_point", "progress"):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid photo_type: '{photo_type}'. Allowed values: 'start_point', 'end_point', 'progress'.",
+                )
+
         # Read bytes for extension determination and size calculation
         if isinstance(file_data, (bytes, bytearray)):
             raw_bytes = bytes(file_data)
@@ -111,12 +123,29 @@ class WorkPhotoService:
                 detail="Invalid file data: must be bytes or file-like object",
             )
 
+        # If uploading a start_point or end_point photo, replace/delete existing photo with same type
+        storage_client = storage or get_file_storage()
+        if photo_type in ("start_point", "end_point"):
+            existing_stmt = select(WorkPhoto).where(
+                WorkPhoto.daily_work_entry_id == entry.id,
+                WorkPhoto.photo_type == photo_type,
+            )
+            existing_res = await session.execute(existing_stmt)
+            for old_p in existing_res.scalars().all():
+                old_path = _extract_storage_path(old_p.image_url)
+                if old_path:
+                    try:
+                        await storage_client.delete_file(old_path)
+                    except FileNotFoundStorageError:
+                        pass
+                await session.delete(old_p)
+            await session.flush()
+
         ext = _determine_extension(filename, raw_bytes)
         date_str = entry.date.strftime("%Y-%m-%d") if entry.date else "unknown"
         photo_id = uuid.uuid4()
         dest_path = f"photos/{entry.employee_id}/{date_str}/{entry.id}/{photo_id}{ext}"
 
-        storage_client = storage or get_file_storage()
         try:
             image_url = await storage_client.upload_file(
                 file_data=file_data,
@@ -137,6 +166,7 @@ class WorkPhotoService:
             image_url=image_url,
             thumbnail_url=None,
             file_size_bytes=file_size_bytes,
+            photo_type=photo_type,
             uploaded_at=datetime.now(timezone.utc),
         )
         session.add(photo)

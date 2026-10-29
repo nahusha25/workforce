@@ -321,6 +321,13 @@ The source document mandates a **maximum of 5 application pages**:
 - **Evidence:** Confirmed pre-existing at baseline commit `06f71ca` via checkout verification.
 - **Status:** **Logged to Backlog (`FE-QUEUE-RACE`)**; tracked separately from Batch 5C.
 
+### Defect 8: Backend Check-in/Check-out Missing Role Guard [OPEN / BACKLOG: BE-ATT-ROLE]
+- **Location:** `backend/app/api/v1/attendance.py` (`POST /check-in`, `POST /check-out`), `backend/app/modules/attendance/service.py`
+- **Problem:** Attendance check-in and check-out endpoints only require `get_current_user` and verify an active `Employee` record and `EmployeeSiteAssignment`. They do not currently enforce `require_role(["employee"])`. The employee-only attendance gating is currently enforced only on the frontend (`RoleGuard` and UI navigation). Non-employee roles (e.g., administrator, supervisor, director) with an active site assignment could theoretically check in via direct API calls.
+- **Impact:** Gating is frontend-only; backend API allows any authenticated user with an employee site assignment to perform attendance check-in/out.
+- **Remediation:** Add role verification dependency or service-level check restricting check-in/out strictly to `role == 'employee'`. (Deferred for future backend hardening batch; do not fix now).
+- **Status:** **Logged to Backlog (`BE-ATT-ROLE`)**; tracked as architectural debt.
+
 ---
 
 ## 9. Detailed Implementation Checklist (Phases 1 to 5)
@@ -362,6 +369,7 @@ The source document mandates a **maximum of 5 application pages**:
 - [x] `FE-009C`: Build Supervisor Attendance Review & Override modal UI (includes `employee_name` & `site_name` scoping and display; verified by 22/22 frontend tests passing in `SupervisorAttendancePage.test.tsx` and 12/12 backend tests).
 - [x] `FE-API-02`: Export `overrideAttendance` API helper in `frontend/src/api/attendance.ts`.
 - [ ] `E2E-003`: Un-skip and execute Playwright J04 out-of-geofence override E2E test.
+- [ ] `BE-ATT-ROLE`: Enforce backend role guard on `POST /api/v1/attendance/check-in` and `/check-out` to restrict access strictly to `employee` role (currently gated on frontend only).
 
 ---
 

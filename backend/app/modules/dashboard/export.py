@@ -243,12 +243,16 @@ async def fetch_report_export_data(
         return title, headers, rows
 
     elif norm_type == "payment-summary":
+        scope = extra_kwargs.get("scope", "all")
         title = "Weekly Payment Summary (Estimated Preview)"
+        if scope == "unbilled_only":
+            title = "Weekly Payment Summary (Unbilled Only)"
         resp = await DashboardService.get_payment_summary_report(
             session=session,
             f=filters,
             page=1,
             page_size=10000,
+            scope=scope,
         )
         headers = [
             "Employee Name",

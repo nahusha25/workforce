@@ -29,7 +29,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         
     if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account is deactivated. Please contact your administrator.",
+        )
         
     return user
 

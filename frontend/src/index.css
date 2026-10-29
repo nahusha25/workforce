@@ -1,3 +1,5 @@
+@import 'leaflet/dist/leaflet.css';
+
 :root {
   /* Primary — used for primary actions and navigation */
   --color-primary-50: #e8f5e9;

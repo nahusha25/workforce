@@ -27,3 +27,5 @@ export function isValidISODate(val: string | null | undefined): boolean {
     parsed.getDate() === d
   );
 }
+
+export { formatWorkingHours } from './workingHours';

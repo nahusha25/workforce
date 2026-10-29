@@ -197,7 +197,7 @@ def test_full_phase1_e2e_lifecycle(client: TestClient, sync_db_session: Session)
             "employee_code": emp_code,
             "system_role": "employee",
             "trade_role_ids": [trade_role_id],
-            "rate_type": "daily",
+            "rate_type": "monthly",
             "rate_amount": 750.0,
             "supervisor_id": supervisor_emp_id,
             "site_ids": [site_id]

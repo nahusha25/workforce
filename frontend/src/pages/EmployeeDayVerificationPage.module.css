@@ -281,6 +281,41 @@
   box-shadow: var(--shadow-md);
 }
 
+.photoItem {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.photoTypeTag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.photoTypeStart {
+  background-color: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.photoTypeEnd {
+  background-color: #f5f3ff;
+  color: #6d28d9;
+  border: 1px solid #ddd6fe;
+}
+
+.photoTypeProgress {
+  background-color: #f0f9ff;
+  color: #0284c7;
+  border: 1px solid #bae6fd;
+}
+
 .brokenImageFallback {
   width: 90px;
   height: 90px;
@@ -923,3 +958,49 @@
   border-radius: 9999px;
   margin-left: 0.75rem;
 }
+
+/* Point-to-Point Measurements in Supervisor Verification */
+.measurementsContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: #ffffff;
+  border: 1px solid var(--color-neutral-200);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+}
+
+.tableResponsive {
+  overflow-x: auto;
+}
+
+.measurementsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.measurementsTable th {
+  text-align: left;
+  padding: 6px 10px;
+  background-color: var(--color-neutral-100);
+  color: var(--color-neutral-700);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-xs);
+  border-bottom: 1px solid var(--color-neutral-300);
+}
+
+.measurementsTable td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--color-neutral-100);
+  color: var(--color-neutral-800);
+}
+
+.totalRow td {
+  padding: 8px 10px;
+  background-color: var(--color-neutral-100);
+  border-top: 2px solid var(--color-neutral-300);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-neutral-900);
+}
+

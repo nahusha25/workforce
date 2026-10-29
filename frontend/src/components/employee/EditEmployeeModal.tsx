@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   getEmployeesApi,
   updateEmployeeApi,
+  type EmployeeClassification,
   type EmployeeResponseData,
   type EmployeeUpdateData,
 } from '../../api/employee';
@@ -40,10 +41,11 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
   // Form states
   const [name, setName] = useState<string>('');
   const [mobileNumber, setMobileNumber] = useState<string>('');
+  const [classification, setClassification] = useState<EmployeeClassification>('regular');
   const [systemRole, setSystemRole] = useState<SystemRole>('employee');
   const [selectedTradeRoleIds, setSelectedTradeRoleIds] = useState<string[]>([]);
-  const [rateType, setRateType] = useState<string>('daily');
-  const [rateAmount, setRateAmount] = useState<string>('500');
+  const [rateType, setRateType] = useState<string>('monthly');
+  const [rateAmount, setRateAmount] = useState<string>('15000');
   const [supervisorId, setSupervisorId] = useState<string>('');
   const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([]);
   const [isActive, setIsActive] = useState<boolean>(true);
@@ -93,13 +95,14 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
     if (employee && isOpen) {
       setName(employee.name || '');
       setMobileNumber(employee.mobile_id || '');
+      setClassification(employee.classification || 'regular');
       setSystemRole(employee.system_role || 'employee');
       setSelectedTradeRoleIds(employee.trade_roles ? employee.trade_roles.map((r) => r.id) : []);
-      setRateType(employee.current_rate?.rate_type || 'daily');
+      setRateType('monthly');
       setRateAmount(
         employee.current_rate?.rate_amount !== undefined && employee.current_rate?.rate_amount !== null
           ? String(employee.current_rate.rate_amount)
-          : '500'
+          : '15000'
       );
       setSupervisorId(employee.supervisor_id || '');
       setSelectedSiteIds(employee.active_sites ? employee.active_sites.map((s) => s.id) : []);
@@ -156,8 +159,8 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
       return;
     }
 
-    if (selectedTradeRoleIds.length === 0) {
-      setError('At least one Trade Role must be selected.');
+    if (systemRole === 'employee' && selectedTradeRoleIds.length === 0) {
+      setError('At least one Trade Role must be selected for Field Worker.');
       return;
     }
 
@@ -167,8 +170,16 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
       return;
     }
 
-    if (selectedSiteIds.length === 0) {
-      setError('At least one Client Site must be assigned.');
+    const isSiteMandatory =
+      systemRole === 'employee' || systemRole === 'supervisor' || classification === 'contract';
+    if (isSiteMandatory && selectedSiteIds.length === 0) {
+      setError(
+        classification === 'contract'
+          ? 'Contract employee must be assigned to at least one site/project.'
+          : `At least one Client Site must be assigned for ${
+              systemRole === 'supervisor' ? 'Supervisor' : 'Field Worker'
+            }.`
+      );
       return;
     }
 
@@ -177,9 +188,10 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
       const payload: EmployeeUpdateData = {
         name: name.trim(),
         mobile_number: formattedMobile,
+        classification: classification,
         system_role: systemRole,
         trade_role_ids: selectedTradeRoleIds,
-        rate_type: rateType,
+        rate_type: 'monthly',
         rate_amount: numericRate,
         supervisor_id: supervisorId ? supervisorId : null,
         site_ids: selectedSiteIds,
@@ -195,6 +207,11 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
     }
   };
 
+  const classificationOptions: SelectOption[] = [
+    { value: 'regular', label: 'Regular Employee' },
+    { value: 'contract', label: 'Contract Employee' },
+  ];
+
   const systemRoleOptions: SelectOption[] = [
     { value: 'employee', label: 'Field Worker' },
     { value: 'supervisor', label: 'Supervisor' },
@@ -203,9 +220,6 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
   ];
 
   const rateTypeOptions: SelectOption[] = [
-    { value: 'daily', label: 'Daily Rate (INR / Day)' },
-    { value: 'piece_rate', label: 'Piece Rate (Per Unit)' },
-    { value: 'hourly', label: 'Hourly Rate (INR / Hr)' },
     { value: 'monthly', label: 'Monthly Fixed Rate' },
   ];
 
@@ -280,6 +294,14 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
 
               <div className={styles.gridTwoCol}>
                 <Select
+                  label="Employee Classification *"
+                  value={classification}
+                  onChange={(e) => setClassification(e.target.value as EmployeeClassification)}
+                  options={classificationOptions}
+                  required
+                  data-testid="edit-emp-classification-select"
+                />
+                <Select
                   label="System Role *"
                   value={systemRole}
                   onChange={(e) => setSystemRole(e.target.value as SystemRole)}
@@ -287,6 +309,9 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
                   required
                   data-testid="edit-emp-system-role-select"
                 />
+              </div>
+
+              <div className={styles.gridTwoCol}>
                 <Select
                   label="Reporting Supervisor"
                   value={supervisorId}
@@ -294,9 +319,6 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
                   options={supervisorOptions}
                   data-testid="edit-emp-supervisor-select"
                 />
-              </div>
-
-              <div className={styles.gridTwoCol}>
                 <Select
                   label="Rate Type *"
                   value={rateType}
@@ -305,8 +327,11 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
                   required
                   data-testid="edit-emp-rate-type-select"
                 />
+              </div>
+
+              <div className={styles.gridTwoCol}>
                 <Input
-                  label="Rate Amount (INR) *"
+                  label="Monthly Salary / Rate Amount (INR) *"
                   type="number"
                   min="0"
                   step="0.01"
@@ -319,7 +344,11 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
 
               {/* Trade Roles Checklist */}
               <div className={styles.formSection}>
-                <label className={styles.sectionTitle}>Trade Roles * (Select all applicable)</label>
+                <label className={styles.sectionTitle}>
+                  {systemRole === 'employee'
+                    ? 'Trade Roles * (Select all applicable)'
+                    : 'Trade Roles (Optional)'}
+                </label>
                 <div className={styles.checkboxGrid} data-testid="edit-emp-trade-roles-container">
                   {tradeRoles.map((role) => (
                     <label key={role.id} className={styles.checkboxLabel}>
@@ -337,7 +366,13 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
 
               {/* Sites Checklist */}
               <div className={styles.formSection}>
-                <label className={styles.sectionTitle}>Assigned Client Sites * (Select at least one)</label>
+                <label className={styles.sectionTitle}>
+                  {classification === 'contract'
+                    ? 'Assigned Client Sites / Project * (Mandatory for Contract Employee)'
+                    : systemRole === 'employee' || systemRole === 'supervisor'
+                    ? 'Assigned Client Sites * (Select at least one)'
+                    : 'Assigned Client Sites (Optional)'}
+                </label>
                 <div className={styles.checkboxGrid} data-testid="edit-emp-sites-container">
                   {sites.map((site) => (
                     <label key={site.id} className={styles.checkboxLabel}>

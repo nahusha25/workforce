@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, Integer, CheckConstraint, Index
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, Integer, CheckConstraint, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from geoalchemy2 import Geography
@@ -45,6 +45,9 @@ class Site(Base):
 
 class EmployeeSiteAssignment(Base):
     __tablename__ = "employee_site_assignments"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "site_id", name="employee_site_assignments_employee_id_site_id_key"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     employee_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("employees.id"), nullable=False)
@@ -158,6 +161,7 @@ class DailyWorkEntry(Base):
     
     quantity: Mapped[float] = mapped_column(Numeric(10, 2), default=0.0, nullable=False)
     uom: Mapped[str] = mapped_column(String(50), nullable=False)
+    measurements: Mapped[Optional[list[dict]]] = mapped_column(JSONB, nullable=True, default=list)
     
     status: Mapped[str] = mapped_column(String, index=True, nullable=False)
     remarks: Mapped[str] = mapped_column(Text, nullable=True)
@@ -183,10 +187,12 @@ class WorkPhoto(Base):
     image_url: Mapped[str] = mapped_column(Text, nullable=False)
     thumbnail_url: Mapped[str] = mapped_column(Text, nullable=True)
     file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=True)
+    photo_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
         CheckConstraint("file_size_bytes IS NULL OR file_size_bytes >= 0", name="check_work_photos_file_size_bytes"),
+        CheckConstraint("photo_type IS NULL OR photo_type IN ('start_point', 'end_point', 'progress')", name="check_work_photos_photo_type"),
     )
 
 class MaterialTransaction(Base):

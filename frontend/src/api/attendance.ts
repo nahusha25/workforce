@@ -6,9 +6,18 @@ export interface AttendanceRecord {
   employee_name?: string | null;
   site_id: string | null;
   site_name?: string | null;
+  site_latitude?: number | null;
+  site_longitude?: number | null;
+  site_permitted_radius_m?: number | null;
   date: string;
   check_in_time: string;
+  check_in_latitude?: number | null;
+  check_in_longitude?: number | null;
+  check_in_distance_m?: number | null;
   check_out_time: string | null;
+  check_out_latitude?: number | null;
+  check_out_longitude?: number | null;
+  check_out_distance_m?: number | null;
   status: string;
   working_hours?: number | null;
   is_within_geofence?: boolean | null;

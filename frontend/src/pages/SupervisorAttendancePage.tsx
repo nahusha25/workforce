@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { getAttendanceRecords, overrideAttendance, type AttendanceRecord } from '../api/attendance';
+import { formatWorkingHours } from '../utils/workingHours';
 import { normalizeError } from '../api/client';
 import {
   Users,
@@ -12,10 +13,28 @@ import {
   RefreshCw,
   X,
   ShieldCheck,
-  Loader2
+  Loader2,
+  MapPin,
+  ExternalLink,
+  Navigation,
 } from 'lucide-react';
 import styles from './SupervisorAttendancePage.module.css';
 import { AxiosError } from 'axios';
+
+const formatCoordinates = (lat?: number | null, lng?: number | null): string => {
+  if (lat == null || lng == null) return '—';
+  const latDir = lat >= 0 ? 'N' : 'S';
+  const lngDir = lng >= 0 ? 'E' : 'W';
+  return `${Math.abs(lat).toFixed(6)}° ${latDir}, ${Math.abs(lng).toFixed(6)}° ${lngDir}`;
+};
+
+const formatDistanceM = (metres?: number | null): string => {
+  if (metres == null) return '—';
+  if (metres >= 1000) {
+    return `${(metres / 1000).toFixed(2)} km (${Math.round(metres).toLocaleString()} m)`;
+  }
+  return `${Math.round(metres).toLocaleString()} m`;
+};
 
 export const SupervisorAttendancePage: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>(() => {
@@ -271,16 +290,40 @@ export const SupervisorAttendancePage: React.FC = () => {
                         <span style={{ color: 'var(--color-neutral-500)' }}>Active</span>
                       )}
                     </td>
-                    <td>{rec.working_hours ? `${Number(rec.working_hours).toFixed(2)}h` : '—'}</td>
+                    <td>{formatWorkingHours(rec.working_hours)}</td>
                     <td>
                       {rec.is_within_geofence === true ? (
-                        <span className={styles.geofenceValid}>
-                          <CheckCircle2 size={12} /> Within
-                        </span>
+                        <div className={styles.geofenceCell}>
+                          <span className={styles.geofenceValid}>
+                            <CheckCircle2 size={12} /> Within
+                          </span>
+                          {rec.check_in_distance_m != null && (
+                            <span className={styles.geofenceDistValid}>
+                              {Math.round(rec.check_in_distance_m)}m from site
+                            </span>
+                          )}
+                        </div>
                       ) : rec.is_within_geofence === false ? (
-                        <span className={styles.geofenceInvalid}>
-                          <AlertTriangle size={12} /> Outside
-                        </span>
+                        <div className={styles.geofenceCell}>
+                          <span className={styles.geofenceInvalid}>
+                            <AlertTriangle size={12} /> Outside
+                          </span>
+                          {rec.check_in_distance_m != null && (
+                            <span className={styles.geofenceDistFlagged}>
+                              {formatDistanceM(rec.check_in_distance_m)} from site
+                            </span>
+                          )}
+                          {rec.check_in_latitude != null && rec.check_in_longitude != null ? (
+                            <span
+                              className={styles.geofenceCoords}
+                              title={`${rec.check_in_latitude}, ${rec.check_in_longitude}`}
+                            >
+                              {rec.check_in_latitude.toFixed(4)}°, {rec.check_in_longitude.toFixed(4)}°
+                            </span>
+                          ) : (
+                            <span className={styles.geofenceCoordsFallback}>No GPS coords</span>
+                          )}
+                        </div>
                       ) : (
                         <span className={styles.geofenceUnknown}>—</span>
                       )}
@@ -355,6 +398,104 @@ export const SupervisorAttendancePage: React.FC = () => {
                   <div className={styles.recordSummaryRow}>
                     <span className={styles.recordSummaryLabel}>Current Status:</span>
                     <span className={styles.recordSummaryValue}>Flagged (Outside Geofence)</span>
+                  </div>
+                </div>
+
+                {/* GPS Location & Distance Inspection */}
+                <div className={styles.locationComparison}>
+                  <div className={styles.locationGrid}>
+                    {/* Reported Check-In Location */}
+                    <div className={`${styles.locationCard} ${styles.locationCardFlagged}`}>
+                      <div className={styles.locationCardHeader}>
+                        <Navigation size={14} className={styles.iconFlagged} />
+                        <span className={styles.headerTextFlagged}>Reported Check-In Location</span>
+                      </div>
+
+                      {modalRecord.check_in_latitude != null && modalRecord.check_in_longitude != null ? (
+                        <>
+                          <div className={styles.coordBox}>
+                            <span className={styles.coordLabel}>Actual Coordinates:</span>
+                            <span className={styles.coordValue}>
+                              {formatCoordinates(modalRecord.check_in_latitude, modalRecord.check_in_longitude)}
+                            </span>
+                            <span className={styles.rawCoordValue}>
+                              ({modalRecord.check_in_latitude.toFixed(6)}, {modalRecord.check_in_longitude.toFixed(6)})
+                            </span>
+                          </div>
+
+                          {modalRecord.check_in_distance_m != null && (
+                            <div className={styles.distanceBadge}>
+                              <div>
+                                <strong>Distance:</strong> {formatDistanceM(modalRecord.check_in_distance_m)} from site
+                              </div>
+                              {modalRecord.site_permitted_radius_m != null &&
+                                modalRecord.check_in_distance_m > modalRecord.site_permitted_radius_m && (
+                                  <span className={styles.distanceExcess}>
+                                    {Math.round(modalRecord.check_in_distance_m - modalRecord.site_permitted_radius_m).toLocaleString()}m outside permitted {modalRecord.site_permitted_radius_m}m radius
+                                  </span>
+                                )}
+                            </div>
+                          )}
+
+                          <a
+                            href={`https://www.openstreetmap.org/?mlat=${modalRecord.check_in_latitude}&mlon=${modalRecord.check_in_longitude}#map=17/${modalRecord.check_in_latitude}/${modalRecord.check_in_longitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={styles.osmLink}
+                            title="View reported check-in location on OpenStreetMap"
+                          >
+                            <MapPin size={14} />
+                            <span>View on OpenStreetMap</span>
+                            <ExternalLink size={12} />
+                          </a>
+                        </>
+                      ) : (
+                        <div className={styles.missingGpsNotice}>
+                          <AlertCircle size={14} />
+                          <span>Actual check-in coordinates are unavailable for this record.</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Registered Site Location */}
+                    <div className={`${styles.locationCard} ${styles.locationCardSite}`}>
+                      <div className={styles.locationCardHeader}>
+                        <MapPin size={14} className={styles.iconSite} />
+                        <span className={styles.headerTextSite}>Registered Site Location</span>
+                      </div>
+
+                      {modalRecord.site_latitude != null && modalRecord.site_longitude != null ? (
+                        <>
+                          <div className={styles.coordBox}>
+                            <span className={styles.coordLabel}>Site Coordinates:</span>
+                            <span className={styles.coordValue}>
+                              {formatCoordinates(modalRecord.site_latitude, modalRecord.site_longitude)}
+                            </span>
+                          </div>
+
+                          <div className={styles.radiusBadge}>
+                            <strong>Permitted Radius:</strong> {modalRecord.site_permitted_radius_m != null ? `${modalRecord.site_permitted_radius_m} m` : '100 m'}
+                          </div>
+
+                          <a
+                            href={`https://www.openstreetmap.org/?mlat=${modalRecord.site_latitude}&mlon=${modalRecord.site_longitude}#map=17/${modalRecord.site_latitude}/${modalRecord.site_longitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={styles.osmLinkSite}
+                            title="View registered site location on OpenStreetMap"
+                          >
+                            <MapPin size={14} />
+                            <span>View Site on OpenStreetMap</span>
+                            <ExternalLink size={12} />
+                          </a>
+                        </>
+                      ) : (
+                        <div className={styles.missingGpsNotice}>
+                          <AlertCircle size={14} />
+                          <span>Site coordinates are not configured for this location.</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 

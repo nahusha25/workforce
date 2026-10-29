@@ -222,3 +222,385 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Camera Preview Modal & Controls */
+.cameraOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.cameraModal {
+  background-color: #0f172a;
+  color: #f8fafc;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 560px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  border: 1px solid #334155;
+}
+
+.cameraHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.cameraTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.closeCameraBtn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.closeCameraBtn:hover {
+  color: #ffffff;
+  background-color: #334155;
+}
+
+.cameraViewfinder {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background-color: #000000;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cameraVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cameraLoadingOverlay {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.cameraErrorContainer {
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+  color: #fca5a5;
+  background-color: #1e1b2e;
+}
+
+.cameraErrorText {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: #f87171;
+  max-width: 440px;
+  margin: 0;
+}
+
+.cameraErrorActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.retryCameraBtn {
+  background-color: #2563eb;
+  color: #ffffff;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.retryCameraBtn:hover {
+  background-color: #1d4ed8;
+}
+
+.cameraFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 16px 20px;
+  background-color: #0f172a;
+  border-top: 1px solid #1e293b;
+}
+
+.shutterBtn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  border: 4px solid #2563eb;
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+}
+
+.shutterBtn:hover:not(:disabled) {
+  transform: scale(1.05);
+  background-color: #f8fafc;
+}
+
+.shutterBtn:active:not(:disabled) {
+  transform: scale(0.95);
+  background-color: #e2e8f0;
+}
+
+.shutterBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cameraActionBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cameraActionBtn:hover:not(:disabled) {
+  background-color: #334155;
+  color: #ffffff;
+}
+
+.cameraActionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Work Evidence Slots (Start & End Points) */
+.evidenceSection {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.evidenceHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.evidenceTitle {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.evidenceSubtitle {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.evidenceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.evidenceCard {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.evidenceCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.slotLabel {
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.startBadge {
+  background-color: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.endBadge {
+  background-color: #f5f3ff;
+  color: #6d28d9;
+  border: 1px solid #ddd6fe;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.missingBadge {
+  background-color: #fff1f2;
+  color: #be123c;
+  border: 1px solid #fecdd3;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.evidenceCardBody {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.evidenceThumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+}
+
+.evidenceEmptyBox {
+  width: 72px;
+  height: 72px;
+  border: 2px dashed #cbd5e1;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  background-color: #f8fafc;
+}
+
+.evidenceActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+}
+
+.slotBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 5px;
+  cursor: pointer;
+  border: 1px solid #cbd5e1;
+  background-color: #ffffff;
+  color: #334155;
+  transition: all 0.2s;
+}
+
+.slotBtn:hover:not(:disabled) {
+  background-color: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.slotBtnPrimary {
+  background-color: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.slotBtnPrimary:hover:not(:disabled) {
+  background-color: #1d4ed8;
+}
+
+.photoTypeBadge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  z-index: 2;
+}
+
+.badgeStart {
+  background-color: #059669;
+  color: #ffffff;
+}
+
+.badgeEnd {
+  background-color: #7c3aed;
+  color: #ffffff;
+}
+
+.badgeProgress {
+  background-color: #0284c7;
+  color: #ffffff;
+}
+

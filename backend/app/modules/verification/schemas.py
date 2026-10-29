@@ -4,6 +4,8 @@ from decimal import Decimal
 from typing import List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.modules.daily_work.schemas import WorkMeasurementItem
+
 EntityTypeLiteral = Literal["attendance", "daily_work", "material", "material_transaction"]
 VerificationActionLiteral = Literal["approved", "rejected", "correction_required"]
 
@@ -123,6 +125,7 @@ class EmployeeDayPhotoDetail(BaseModel):
     image_url: str
     thumbnail_url: Optional[str] = None
     file_size_bytes: Optional[int] = None
+    photo_type: Optional[str] = None
     uploaded_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -168,6 +171,7 @@ class EmployeeDayWorkEntryDetail(BaseModel):
     verification_remarks: Optional[str] = None
     # Full chronological audit trail.
     history: List[VerificationHistoryEvent] = []
+    measurements: Optional[List[WorkMeasurementItem]] = Field(default_factory=list)
     photos: List[EmployeeDayPhotoDetail] = []
     materials: List[EmployeeDayMaterialDetail] = []
 

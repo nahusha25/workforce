@@ -84,3 +84,15 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client():
     yield TestClient(app)
+
+
+from app.shared.file_storage import LocalFileStorage
+
+
+@pytest.fixture(autouse=True)
+def isolate_receipts_storage(tmp_path, monkeypatch):
+    """Ensures test receipts are isolated in tmp_path and never pollute backend/storage."""
+    isolated_storage = LocalFileStorage(receipts_dir=tmp_path / "test_receipts")
+    monkeypatch.setattr("app.shared.file_storage.get_file_storage", lambda: isolated_storage)
+    monkeypatch.setattr("app.modules.client_payments.service.get_file_storage", lambda: isolated_storage)
+    yield isolated_storage

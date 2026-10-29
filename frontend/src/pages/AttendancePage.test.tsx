@@ -2,9 +2,10 @@
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { MemoryRouter } from 'react-router-dom';
-import { AttendancePage } from './AttendancePage';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { AttendancePage, checkSessionDailyWorkStatus } from './AttendancePage';
 import { getAttendanceRecords, checkIn, checkOut } from '../api/attendance';
+import { getDailyWorkEntries } from '../api/dailyWork';
 import * as useGeoMock from '../hooks/useGeolocation';
 
 // Mock child components if needed
@@ -33,6 +34,10 @@ vi.mock('../api/attendance', () => ({
   checkOut: vi.fn(),
 }));
 
+vi.mock('../api/dailyWork', () => ({
+  getDailyWorkEntries: vi.fn(),
+}));
+
 import { AuthContext } from '../context/AuthContext';
 import type { EmployeeProfile } from '../types/auth';
 
@@ -57,7 +62,7 @@ const defaultAuthUser: EmployeeProfile = {
   active_sites: [{ id: 'site-1', name: 'Central Station Site' }],
 };
 
-const renderComponent = (user: EmployeeProfile | null = defaultAuthUser) =>
+const renderComponent = (user: EmployeeProfile | null = defaultAuthUser, initialEntries = ['/attendance']) =>
   render(
     <AuthContext.Provider
       value={{
@@ -73,8 +78,11 @@ const renderComponent = (user: EmployeeProfile | null = defaultAuthUser) =>
         clearError: vi.fn(),
       }}
     >
-      <MemoryRouter>
-        <AttendancePage />
+      <MemoryRouter initialEntries={initialEntries}>
+        <Routes>
+          <Route path="/attendance" element={<AttendancePage />} />
+          <Route path="/daily-work" element={<div data-testid="daily-work-page">Daily Work Page</div>} />
+        </Routes>
       </MemoryRouter>
     </AuthContext.Provider>
   );
@@ -90,6 +98,14 @@ describe('AttendancePage', () => {
     });
     
     (getAttendanceRecords as any).mockResolvedValue([]);
+    (getDailyWorkEntries as any).mockResolvedValue([
+      {
+        id: 'dwe-1',
+        attendance_record_id: '1',
+        work_date: '2026-08-17',
+        status: 'submitted',
+      },
+    ]);
   });
 
   afterEach(() => {
@@ -242,7 +258,7 @@ describe('AttendancePage', () => {
     });
   });
 
-  it('checkout warning modal appears when requires_confirmation is true', async () => {
+  it('checkout warning modal appears when daily work has not been submitted and does NOT invoke checkout API', async () => {
     (getAttendanceRecords as any).mockResolvedValue([{
       id: 'rec-warn-1',
       check_in_time: '2026-08-17T08:00:00Z',
@@ -256,12 +272,7 @@ describe('AttendancePage', () => {
       getLocation: mockGetLocation,
     });
 
-    (checkOut as any).mockResolvedValue({
-      status: 'success',
-      record_id: 'rec-warn-1',
-      requires_confirmation: true,
-      warning: 'No daily work entries submitted for this session. Please confirm check-out.',
-    });
+    (getDailyWorkEntries as any).mockResolvedValue([]);
 
     renderComponent();
 
@@ -278,14 +289,16 @@ describe('AttendancePage', () => {
       expect(
         screen.getByText('No daily work entries submitted for this session. Please confirm check-out.')
       ).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Complete Daily Work/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Check out anyway/i })).toBeInTheDocument();
-      // Should not immediately display success banner while warning modal is open
+      expect(screen.getByTestId('complete-daily-work-btn')).toBeInTheDocument();
+      expect(screen.getByTestId('check-out-anyway-btn')).toBeInTheDocument();
+      // Crucial: checkOut API must NOT have been called!
+      expect(checkOut).not.toHaveBeenCalled();
+      // Should not display success banner while warning modal is open
       expect(screen.queryByText('Successfully checked out!')).not.toBeInTheDocument();
     });
   });
 
-  it('checkout warning modal does NOT appear on a normal checkout', async () => {
+  it('checkout warning modal does NOT appear on a normal checkout when daily work is completed', async () => {
     (getAttendanceRecords as any).mockResolvedValue([{
       id: 'rec-normal-1',
       check_in_time: '2026-08-17T08:00:00Z',
@@ -299,7 +312,15 @@ describe('AttendancePage', () => {
       getLocation: mockGetLocation,
     });
 
-    // Normal checkout with no requires_confirmation flag
+    (getDailyWorkEntries as any).mockResolvedValue([
+      {
+        id: 'dwe-normal-1',
+        attendance_record_id: 'rec-normal-1',
+        work_date: '2026-08-17',
+        status: 'submitted',
+      },
+    ]);
+
     (checkOut as any).mockResolvedValue({
       status: 'success',
       record_id: 'rec-normal-1',
@@ -315,12 +336,104 @@ describe('AttendancePage', () => {
     fireEvent.click(checkOutBtn);
 
     await waitFor(() => {
+      expect(checkOut).toHaveBeenCalledTimes(1);
       expect(screen.getByText('Successfully checked out!')).toBeInTheDocument();
       expect(screen.queryByTestId('checkout-warning-modal')).not.toBeInTheDocument();
     });
   });
 
-  it('"check out anyway" proceeds successfully', async () => {
+  it('clicking "Complete Daily Work" closes modal, navigates to Daily Work, does not call checkout, and preserves session', async () => {
+    (getAttendanceRecords as any).mockResolvedValue([{
+      id: 'rec-warn-nav',
+      check_in_time: '2026-08-17T08:00:00Z',
+      check_out_time: null,
+    }]);
+
+    (useGeoMock.useGeolocation as any).mockReturnValue({
+      location: { latitude: 12.9716, longitude: 77.5946 },
+      error: null,
+      loading: false,
+      getLocation: mockGetLocation,
+    });
+
+    (getDailyWorkEntries as any).mockResolvedValue([]);
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /CHECK OUT/i })).toBeInTheDocument();
+    });
+
+    const checkOutBtn = screen.getByRole('button', { name: /CHECK OUT/i });
+    fireEvent.click(checkOutBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('checkout-warning-modal')).toBeInTheDocument();
+    });
+
+    // Check that checkout API was not called
+    expect(checkOut).not.toHaveBeenCalled();
+
+    // Click "Complete Daily Work"
+    const completeBtn = screen.getByTestId('complete-daily-work-btn');
+    fireEvent.click(completeBtn);
+
+    await waitFor(() => {
+      // Modal is closed
+      expect(screen.queryByTestId('checkout-warning-modal')).not.toBeInTheDocument();
+      // Navigated to /daily-work
+      expect(screen.getByTestId('daily-work-page')).toBeInTheDocument();
+      // checkout was NEVER called
+      expect(checkOut).not.toHaveBeenCalled();
+      // No success banner was emitted
+      expect(screen.queryByText('Successfully checked out!')).not.toBeInTheDocument();
+    });
+  });
+
+  it('closing the warning modal does not invoke checkout and preserves active session', async () => {
+    (getAttendanceRecords as any).mockResolvedValue([{
+      id: 'rec-close-modal',
+      check_in_time: '2026-08-17T08:00:00Z',
+      check_out_time: null,
+    }]);
+
+    (useGeoMock.useGeolocation as any).mockReturnValue({
+      location: { latitude: 12.9716, longitude: 77.5946 },
+      error: null,
+      loading: false,
+      getLocation: mockGetLocation,
+    });
+
+    (getDailyWorkEntries as any).mockResolvedValue([]);
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /CHECK OUT/i })).toBeInTheDocument();
+    });
+
+    const checkOutBtn = screen.getByRole('button', { name: /CHECK OUT/i });
+    fireEvent.click(checkOutBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('checkout-warning-modal')).toBeInTheDocument();
+    });
+
+    expect(checkOut).not.toHaveBeenCalled();
+
+    // Click the X close button
+    const closeBtn = screen.getByRole('button', { name: /Close modal/i });
+    fireEvent.click(closeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('checkout-warning-modal')).not.toBeInTheDocument();
+      expect(checkOut).not.toHaveBeenCalled();
+      expect(screen.queryByText('Successfully checked out!')).not.toBeInTheDocument();
+      expect(screen.getByText('Checked In')).toBeInTheDocument();
+    });
+  });
+
+  it('"check out anyway" proceeds successfully and invokes checkout exactly once', async () => {
     (getAttendanceRecords as any).mockResolvedValue([{
       id: 'rec-anyway-1',
       check_in_time: '2026-08-17T08:00:00Z',
@@ -333,6 +446,14 @@ describe('AttendancePage', () => {
       loading: false,
       getLocation: mockGetLocation,
     });
+
+    (getDailyWorkEntries as any).mockResolvedValue([
+      {
+        id: 'dwe-draft-1',
+        attendance_record_id: 'rec-anyway-1',
+        status: 'draft',
+      },
+    ]);
 
     (checkOut as any).mockResolvedValue({
       status: 'success',
@@ -354,12 +475,17 @@ describe('AttendancePage', () => {
       expect(screen.getByTestId('checkout-warning-modal')).toBeInTheDocument();
     });
 
+    // Check that checkOut was not yet invoked
+    expect(checkOut).not.toHaveBeenCalled();
+
     // Click "Check out anyway"
-    const anywayBtn = screen.getByRole('button', { name: /Check out anyway/i });
+    const anywayBtn = screen.getByTestId('check-out-anyway-btn');
     fireEvent.click(anywayBtn);
 
     await waitFor(() => {
       expect(screen.queryByTestId('checkout-warning-modal')).not.toBeInTheDocument();
+      expect(checkOut).toHaveBeenCalledTimes(1);
+      expect(checkOut).toHaveBeenCalledWith({ latitude: 12.9716, longitude: 77.5946 });
       expect(screen.getByText('Successfully checked out!')).toBeInTheDocument();
       expect(getAttendanceRecords).toHaveBeenCalled();
     });
@@ -390,5 +516,126 @@ describe('AttendancePage', () => {
       expect(screen.getByRole('button', { name: /CHECK IN/i })).toBeInTheDocument();
     });
     expect(screen.queryByTestId('unassigned-site-message')).not.toBeInTheDocument();
+  });
+
+  it('allows employee to return to attendance and check out normally after completing daily work', async () => {
+    (getAttendanceRecords as any).mockResolvedValue([{
+      id: 'rec-return-1',
+      check_in_time: '2026-08-17T08:00:00Z',
+      check_out_time: null,
+    }]);
+
+    (useGeoMock.useGeolocation as any).mockReturnValue({
+      location: { latitude: 12.9716, longitude: 77.5946 },
+      error: null,
+      loading: false,
+      getLocation: mockGetLocation,
+    });
+
+    // Step 1: No daily work entries initially -> warning appears
+    (getDailyWorkEntries as any).mockResolvedValue([]);
+
+    const { unmount } = renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /CHECK OUT/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /CHECK OUT/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('checkout-warning-modal')).toBeInTheDocument();
+    });
+
+    expect(checkOut).not.toHaveBeenCalled();
+
+    // Click "Complete Daily Work" -> modal closes, navigates away
+    fireEvent.click(screen.getByTestId('complete-daily-work-btn'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('checkout-warning-modal')).not.toBeInTheDocument();
+      expect(screen.getByTestId('daily-work-page')).toBeInTheDocument();
+    });
+
+    expect(checkOut).not.toHaveBeenCalled();
+    unmount();
+
+    // Step 2: Employee completes daily work and returns to Attendance page
+    (getDailyWorkEntries as any).mockResolvedValue([
+      {
+        id: 'dwe-completed-1',
+        attendance_record_id: 'rec-return-1',
+        work_date: '2026-08-17',
+        status: 'submitted',
+      },
+    ]);
+
+    (checkOut as any).mockResolvedValue({
+      status: 'success',
+      record_id: 'rec-return-1',
+    });
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /CHECK OUT/i })).toBeInTheDocument();
+    });
+
+    // Employee clicks CHECK OUT now -> normal checkout without warning modal
+    fireEvent.click(screen.getByRole('button', { name: /CHECK OUT/i }));
+
+    await waitFor(() => {
+      expect(checkOut).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('checkout-warning-modal')).not.toBeInTheDocument();
+      expect(screen.getByText('Successfully checked out!')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('checkSessionDailyWorkStatus helper', () => {
+  it('returns requiresConfirmation true when no entries exist', () => {
+    const result = checkSessionDailyWorkStatus([], 'att-1', '2026-10-14');
+    expect(result.requiresConfirmation).toBe(true);
+    expect(result.warning).toContain('No daily work entries submitted for this session');
+  });
+
+  it('returns requiresConfirmation true when draft entries exist for the session', () => {
+    const result = checkSessionDailyWorkStatus([
+      {
+        id: 'dwe-1',
+        attendance_record_id: 'att-1',
+        work_date: '2026-10-14',
+        status: 'draft',
+      } as any,
+    ], 'att-1');
+    expect(result.requiresConfirmation).toBe(true);
+    expect(result.warning).toContain('unsubmitted draft work entries');
+  });
+
+  it('returns requiresConfirmation false when entries are submitted', () => {
+    const result = checkSessionDailyWorkStatus([
+      {
+        id: 'dwe-1',
+        attendance_record_id: 'att-1',
+        work_date: '2026-10-14',
+        status: 'submitted',
+      } as any,
+    ], 'att-1');
+    expect(result.requiresConfirmation).toBe(false);
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('filters entries by attendance_record_id correctly', () => {
+    // Only entries from other attendance sessions exist
+    const result = checkSessionDailyWorkStatus([
+      {
+        id: 'dwe-other',
+        attendance_record_id: 'att-other',
+        work_date: '2026-10-14',
+        status: 'submitted',
+      } as any,
+    ], 'att-current');
+    expect(result.requiresConfirmation).toBe(true);
+    expect(result.warning).toContain('No daily work entries submitted for this session');
   });
 });

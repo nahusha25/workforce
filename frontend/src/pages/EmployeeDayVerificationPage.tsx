@@ -16,7 +16,7 @@ import { ExceptionBadge } from '../components/ui/ExceptionBadge';
 import { StatusBadge, mapAttendanceStatusToBadge } from '../components/ui/StatusBadge';
 import { AuditHistoryTimeline } from '../components/verification/AuditHistoryTimeline';
 import { formatDecimal } from '../components/MaterialTransactionEntry';
-import { getLocalISODate, isValidISODate } from '../utils/date';
+import { getLocalISODate, isValidISODate, formatWorkingHours } from '../utils/date';
 import {
   ArrowLeft,
   Calendar,
@@ -32,6 +32,7 @@ import {
   Camera,
   ImageOff,
   MessageSquare,
+  Ruler,
 } from 'lucide-react';
 import styles from './EmployeeDayVerificationPage.module.css';
 
@@ -643,14 +644,14 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                 <div className={styles.detailField}>
                   <span className={styles.detailLabel}>Hours Worked</span>
                   <span className={styles.detailValue}>
-                    {detail.attendance.working_hours != null ? `${detail.attendance.working_hours}h` : '—'}
+                    {formatWorkingHours(detail.attendance.working_hours)}
                   </span>
                 </div>
 
                 <div className={styles.detailField}>
                   <span className={styles.detailLabel}>Overtime</span>
                   <span className={styles.detailValue}>
-                    {detail.attendance.overtime_hours != null ? `${detail.attendance.overtime_hours}h` : '—'}
+                    {formatWorkingHours(detail.attendance.overtime_hours)}
                   </span>
                 </div>
 
@@ -835,6 +836,46 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* Point-to-Point Work Measurements Table */}
+                    {entry.measurements && entry.measurements.length > 0 && (
+                      <div className={styles.measurementsContainer} data-testid={`entry-measurements-container-${entry.id}`}>
+                        <span className={styles.photosTitle}>
+                          <Ruler size={14} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '4px' }} />
+                          Point-to-Point Work Measurements ({entry.measurements.length} spans)
+                        </span>
+                        <div className={styles.tableResponsive}>
+                          <table className={styles.measurementsTable} data-testid={`supervisor-measurements-table-${entry.id}`}>
+                            <thead>
+                              <tr>
+                                <th>Start Point</th>
+                                <th>End Point</th>
+                                <th style={{ textAlign: 'right' }}>Distance</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {entry.measurements.map((m, mIdx) => (
+                                <tr key={mIdx} data-testid={`supervisor-measurement-row-${mIdx}`}>
+                                  <td data-testid={`supervisor-measurement-start-${mIdx}`}>{m.start_point}</td>
+                                  <td data-testid={`supervisor-measurement-end-${mIdx}`}>{m.end_point}</td>
+                                  <td style={{ textAlign: 'right' }} data-testid={`supervisor-measurement-distance-${mIdx}`}>
+                                    {m.distance} m
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className={styles.totalRow} data-testid="supervisor-measurements-total-row">
+                                <td colSpan={2}><strong>Total Distance</strong></td>
+                                <td style={{ textAlign: 'right' }} data-testid="supervisor-measurements-total-value">
+                                  <strong>{entry.quantity} {entry.uom}</strong>
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Photos */}
                     {entry.photos && entry.photos.length > 0 && (
                       <div className={styles.photosContainer}>
@@ -845,6 +886,27 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                         <div className={styles.photoGrid}>
                           {entry.photos.map((photo) => {
                             const isBroken = brokenImages.has(photo.id);
+                            const photoTypeTestId =
+                              photo.photo_type === 'start_point'
+                                ? 'start-point-photo'
+                                : photo.photo_type === 'end_point'
+                                ? 'end-point-photo'
+                                : 'progress-photo';
+                            const photoTypeBadgeClass =
+                              photo.photo_type === 'start_point'
+                                ? styles.photoTypeStart
+                                : photo.photo_type === 'end_point'
+                                ? styles.photoTypeEnd
+                                : styles.photoTypeProgress;
+                            const photoTypeLabel =
+                              photo.photo_type === 'start_point'
+                                ? 'Start Point'
+                                : photo.photo_type === 'end_point'
+                                ? 'End Point'
+                                : photo.photo_type === 'progress'
+                                ? 'Progress'
+                                : null;
+
                             return isBroken ? (
                               <div
                                 key={photo.id}
@@ -863,15 +925,28 @@ export const EmployeeDayVerificationPage: React.FC = () => {
                                 </a>
                               </div>
                             ) : (
-                              <img
+                              <div
                                 key={photo.id}
-                                src={photo.thumbnail_url || photo.image_url}
-                                alt="Work site capture"
-                                className={styles.photoThumb}
-                                data-testid="photo-thumbnail"
-                                onClick={() => openLightbox(photo.image_url)}
-                                onError={() => handleImageError(photo.id)}
-                              />
+                                className={styles.photoItem}
+                                data-testid={photoTypeTestId}
+                              >
+                                {photoTypeLabel && (
+                                  <span
+                                    className={`${styles.photoTypeTag} ${photoTypeBadgeClass}`}
+                                    data-testid={`${photo.photo_type}-badge`}
+                                  >
+                                    {photoTypeLabel}
+                                  </span>
+                                )}
+                                <img
+                                  src={photo.thumbnail_url || photo.image_url}
+                                  alt={photoTypeLabel ? `${photoTypeLabel} capture` : 'Work site capture'}
+                                  className={styles.photoThumb}
+                                  data-testid="photo-thumbnail"
+                                  onClick={() => openLightbox(photo.image_url)}
+                                  onError={() => handleImageError(photo.id)}
+                                />
+                              </div>
                             );
                           })}
                         </div>

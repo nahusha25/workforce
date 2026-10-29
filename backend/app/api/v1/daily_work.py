@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -12,10 +12,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.auth import User
-from app.models.operations import Activity, DailyWorkEntry, MaterialTransaction, WorkOrder, WorkPhoto
+from app.models.material_inventory import MaterialStock
+from app.models.operations import (
+    Activity,
+    DailyWorkEntry,
+    EmployeeSiteAssignment,
+    Material,
+    MaterialTransaction,
+    Site,
+    WorkOrder,
+    WorkPhoto,
+)
 from app.models.workforce import Employee
 from app.modules.daily_work.material_service import MaterialTransactionService
 from app.modules.daily_work.photo_service import WorkPhotoService
+from app.modules.material_inventory.schemas import MaterialSiteStockResponse
+from app.modules.material_inventory.service import MaterialInventoryService
 from app.modules.daily_work.schemas import (
     BillUploadResponse,
     DailyWorkEntryCreate,
@@ -29,7 +41,7 @@ from app.modules.daily_work.schemas import (
 )
 from app.modules.daily_work.service import EDITABLE_STATUSES, DailyWorkService
 from app.modules.master_data.repository import MasterDataRepository
-from app.modules.master_data.schemas import ActivityResponse, WorkOrderResponse
+from app.modules.master_data.schemas import ActivityResponse, MaterialResponse, WorkOrderResponse
 from app.modules.master_data.service import MasterDataService
 from app.shared.file_storage import detect_mime_type_from_bytes
 
@@ -293,6 +305,99 @@ async def list_daily_work_work_orders(
     return result.scalars().all()
 
 
+@router.get("/materials", response_model=list[MaterialResponse], status_code=status.HTTP_200_OK)
+async def list_daily_work_materials(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    stmt = select(Material).where(Material.is_active == True).order_by(Material.name.asc())
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@router.get(
+    "/sites/{site_id}/materials/{material_id}/availability",
+    response_model=MaterialSiteStockResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get material stock availability for daily work at a site",
+)
+async def get_daily_work_material_availability(
+    site_id: uuid.UUID,
+    material_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieves the stock balance for a specified site and material for Daily Work.
+    - Authorized for Directors, Administrators, Supervisors (assigned to site),
+      and Employees (actively assigned to site).
+    - If no stock row exists, returns 0.00 without creating a database row.
+    - Strictly read-only; does not expose global inventory or allow adjustments.
+    """
+    # 1. Authorize role & site assignment
+    if current_user.role == "employee":
+        emp = await get_optional_employee(current_user, db)
+        if not emp:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee profile not found.")
+        stmt_asgn = select(EmployeeSiteAssignment).where(
+            EmployeeSiteAssignment.employee_id == emp.id,
+            EmployeeSiteAssignment.site_id == site_id,
+            EmployeeSiteAssignment.is_active == True,
+        )
+        asgn = (await db.execute(stmt_asgn)).scalars().first()
+        if not asgn:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Employee is not actively assigned to this site.",
+            )
+    elif current_user.role == "supervisor":
+        supervised_sites = await MaterialInventoryService.get_supervised_site_ids(db, current_user)
+        if site_id not in supervised_sites:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Supervisor is not authorized to view inventory for this site.",
+            )
+    elif current_user.role not in ("administrator", "director"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions to view material stock.",
+        )
+
+    # 2. Site validation
+    stmt_site = select(Site).where(Site.id == site_id)
+    site = (await db.execute(stmt_site)).scalar_one_or_none()
+    if not site:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Site with id {site_id} not found.")
+
+    # 3. Material validation
+    stmt_mat = select(Material).where(Material.id == material_id)
+    material = (await db.execute(stmt_mat)).scalar_one_or_none()
+    if not material:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Material with id {material_id} not found.")
+
+    # 4. Stock row query (read-only, does not create row)
+    stmt_stock = select(MaterialStock).where(
+        MaterialStock.site_id == site_id,
+        MaterialStock.material_id == material_id,
+    )
+    stock = (await db.execute(stmt_stock)).scalar_one_or_none()
+    qty = stock.quantity if stock else Decimal("0.00")
+
+    return MaterialSiteStockResponse(
+        site_id=site.id,
+        site_name=site.name,
+        material_id=material.id,
+        material_code=material.material_code,
+        material_name=material.name,
+        unit_of_measure=material.unit_of_measure,
+        category=material.category,
+        quantity_available=qty,
+        last_movement_at=None,
+        is_active=material.is_active,
+    )
+
+
+
 # ---------------------------------------------------------------------------
 # WRK-003: Get Daily Work Entry Detail
 # ---------------------------------------------------------------------------
@@ -444,6 +549,8 @@ async def submit_work_entry(
 async def upload_photo(
     id: uuid.UUID,
     file: UploadFile = File(...),
+    photo_type: Optional[str] = Query(None, description="Photo type: start_point, end_point, progress"),
+    photo_type_form: Optional[str] = Form(None, alias="photo_type"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -496,6 +603,8 @@ async def upload_photo(
             detail="Invalid file type. Only JPEG/PNG/WEBP allowed.",
         )
 
+    resolved_photo_type = photo_type_form or photo_type
+
     photo = await WorkPhotoService.upload_photo(
         session=db,
         daily_work_entry_id=id,
@@ -504,6 +613,7 @@ async def upload_photo(
         content_type=file.content_type,
         employee_id=emp.id,
         is_admin=False,
+        photo_type=resolved_photo_type,
     )
     return photo
 

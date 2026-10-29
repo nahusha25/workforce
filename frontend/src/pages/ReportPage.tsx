@@ -65,6 +65,7 @@ export const ReportPage: React.FC = () => {
     transaction_type: null,
     is_high_value: null,
     sort_category: null,
+    scope: activeReportType === 'payment-summary' ? 'all' : undefined,
   }));
 
   // Reset page to 1 when report type changes
@@ -76,6 +77,7 @@ export const ReportPage: React.FC = () => {
       transaction_type: null,
       is_high_value: null,
       sort_category: null,
+      scope: activeReportType === 'payment-summary' ? 'all' : undefined,
     }));
   }, [activeReportType]);
 
@@ -101,6 +103,7 @@ export const ReportPage: React.FC = () => {
       transaction_type: null,
       is_high_value: null,
       sort_category: null,
+      scope: activeReportType === 'payment-summary' ? 'all' : undefined,
     });
   };
 
@@ -230,7 +233,41 @@ export const ReportPage: React.FC = () => {
             </select>
           </div>
         )}
+
+        {activeReportType === 'payment-summary' && (
+          <div className={styles.customFilterGroup}>
+            <label htmlFor="filter-payment-scope">Scope:</label>
+            <select
+              id="filter-payment-scope"
+              className={styles.customSelect}
+              value={filters.scope || 'all'}
+              onChange={(e) => handleFilterChange({ scope: (e.target.value as 'all' | 'unbilled_only') || 'all' })}
+              data-testid="filter-payment-scope"
+            >
+              <option value="all">All Earned Labor</option>
+              <option value="unbilled_only">Unbilled Only</option>
+            </select>
+          </div>
+        )}
       </FilterBar>
+
+      {/* Payment Summary Scope Explanation Notice */}
+      {activeReportType === 'payment-summary' && (
+        <div className={styles.scopeNotice} data-testid="payment-scope-notice">
+          <span className={styles.noticeIcon} aria-hidden="true">ℹ</span>
+          <span>
+            {filters.scope === 'unbilled_only' ? (
+              <>
+                <strong>Unbilled Only Scope:</strong> Showing approved labor not yet included in active employee payment statements. Cancelled payment records release their source entries back to this view.
+              </>
+            ) : (
+              <>
+                <strong>Total Earned Labor Scope:</strong> Measures total operational labor value earned across the period using effective-dated wage rates. Does not reflect unpaid payroll liabilities. Switch to &quot;Unbilled Only&quot; to exclude records already processed in employee payments.
+              </>
+            )}
+          </span>
+        </div>
+      )}
 
       {/* Error state */}
       {isError && (

@@ -249,6 +249,7 @@ class PaymentSummaryResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    scope: str = "all"
     note: str = (
         "This is an estimated preview only. "
         "No payment records have been created. "

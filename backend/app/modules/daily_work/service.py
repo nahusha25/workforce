@@ -12,15 +12,37 @@ from app.models.operations import (
     AttendanceRecord,
     DailyWorkEntry,
     EmployeeSiteAssignment,
+    Material,
+    MaterialTransaction,
     Site,
     WorkOrder,
 )
 from app.models.system import AuditLog
 from app.models.workforce import Employee
 from app.modules.attendance.service import AttendanceService
-from app.modules.daily_work.schemas import DailyWorkEntryCreate, DailyWorkEntryUpdate
+from app.modules.daily_work.schemas import DailyWorkEntryCreate, DailyWorkEntryUpdate, WorkMeasurementItem
 
 EDITABLE_STATUSES: Tuple[str, ...] = ("draft", "correction_required")
+
+DISTANCE_UOMS: set[str] = {"m", "metre", "metres", "meter", "meters", "mtr", "mtrs"}
+
+
+def is_distance_uom(uom: Optional[str]) -> bool:
+    if not uom:
+        return False
+    return uom.strip().lower() in DISTANCE_UOMS
+
+
+def are_uoms_compatible(uom1: Optional[str], uom2: Optional[str]) -> bool:
+    if not uom1 or not uom2:
+        return False
+    s1 = uom1.strip().lower()
+    s2 = uom2.strip().lower()
+    if s1 == s2:
+        return True
+    if is_distance_uom(s1) and is_distance_uom(s2):
+        return True
+    return False
 
 
 def _get_data_dict(data: Any) -> dict:
@@ -79,6 +101,149 @@ class DailyWorkService:
                 return True
 
         return False
+
+    @staticmethod
+    async def find_mapped_inventory_material(
+        session: AsyncSession,
+        activity: Activity,
+    ) -> Tuple[Optional[Material], Optional[str]]:
+        """Find catalogue inventory material reliably mapped to activity, or reason if not found."""
+        act_uom = (activity.unit_of_measure or "").strip().lower()
+        is_distance_act = is_distance_uom(act_uom) or activity.category == "cable"
+
+        stmt = select(Material).where(
+            Material.is_active == True,
+            Material.category == activity.category,
+        )
+        res = await session.execute(stmt)
+        candidates = list(res.scalars().all())
+
+        if not candidates:
+            return None, f"No active inventory material found in catalogue for category '{activity.category}'"
+
+        # Filter by compatible unit of measure
+        compatible = []
+        for mat in candidates:
+            mat_uom = (mat.unit_of_measure or "").strip().lower()
+            if is_distance_act and is_distance_uom(mat_uom):
+                compatible.append(mat)
+            elif not is_distance_act and are_uoms_compatible(mat_uom, act_uom):
+                compatible.append(mat)
+
+        if not compatible:
+            return None, f"No inventory material with matching category '{activity.category}' and compatible unit of measure ('{activity.unit_of_measure}') found in catalogue"
+
+        if len(compatible) == 1:
+            return compatible[0], None
+
+        # Disambiguate by name match if possible
+        for mat in compatible:
+            if mat.name.strip().lower() == activity.name.strip().lower():
+                return mat, None
+
+        if activity.category == "cable":
+            cable_matches = [m for m in compatible if "cable" in m.name.lower()]
+            if len(cable_matches) == 1:
+                return cable_matches[0], None
+
+        return None, f"Multiple inventory materials match category '{activity.category}' and unit '{activity.unit_of_measure}'. Explicit selection required."
+
+    @staticmethod
+    async def find_matching_consumed_material_transaction(
+        session: AsyncSession,
+        entry: DailyWorkEntry,
+        activity: Optional[Activity] = None,
+    ) -> Optional[MaterialTransaction]:
+        """Find the existing consumed MaterialTransaction that reliably maps to the entry's activity."""
+        if not activity:
+            stmt_act = select(Activity).where(Activity.id == entry.activity_id)
+            res_act = await session.execute(stmt_act)
+            activity = res_act.scalars().first()
+            if not activity:
+                return None
+
+        stmt_txs = select(MaterialTransaction).where(
+            MaterialTransaction.daily_work_entry_id == entry.id,
+            MaterialTransaction.transaction_type == "consumed",
+        )
+        res_txs = await session.execute(stmt_txs)
+        consumed_txs = list(res_txs.scalars().all())
+        if not consumed_txs:
+            return None
+
+        act_uom = (activity.unit_of_measure or "").strip().lower()
+        is_distance_act = is_distance_uom(act_uom) or activity.category == "cable"
+
+        matching_txs = []
+        for tx in consumed_txs:
+            if tx.material_id:
+                stmt_mat = select(Material).where(Material.id == tx.material_id)
+                res_mat = await session.execute(stmt_mat)
+                mat = res_mat.scalars().first()
+                if mat:
+                    mat_uom = (mat.unit_of_measure or "").strip().lower()
+                    if mat.category == activity.category:
+                        if is_distance_act:
+                            if is_distance_uom(mat_uom):
+                                matching_txs.append(tx)
+                        elif are_uoms_compatible(mat_uom, act_uom):
+                            matching_txs.append(tx)
+                    elif mat.name.strip().lower() == activity.name.strip().lower() and (
+                        not is_distance_act or is_distance_uom(mat_uom)
+                    ):
+                        matching_txs.append(tx)
+            else:
+                tx_name = (tx.item_name or "").strip().lower()
+                act_name = (activity.name or "").strip().lower()
+                if tx_name == act_name or (activity.category == "cable" and "cable" in tx_name):
+                    matching_txs.append(tx)
+
+        if len(matching_txs) == 1:
+            return matching_txs[0]
+        elif len(matching_txs) > 1:
+            for tx in matching_txs:
+                if (tx.item_name or "").strip().lower() == activity.name.strip().lower():
+                    return tx
+            return matching_txs[0]
+
+        return None
+
+    @staticmethod
+    async def explain_activity_material_mapping(
+        session: AsyncSession,
+        activity_id: uuid.UUID,
+    ) -> dict:
+        """Provide detailed diagnostic mapping information for an activity."""
+        stmt_act = select(Activity).where(Activity.id == activity_id)
+        res_act = await session.execute(stmt_act)
+        activity = res_act.scalars().first()
+        if not activity:
+            return {
+                "activity_id": str(activity_id),
+                "is_mapped": False,
+                "reason": "Activity not found in master data",
+            }
+
+        mat, reason = await DailyWorkService.find_mapped_inventory_material(session, activity)
+        if mat:
+            return {
+                "activity_id": str(activity.id),
+                "activity_name": activity.name,
+                "activity_category": activity.category,
+                "activity_uom": activity.unit_of_measure,
+                "is_mapped": True,
+                "mapped_material_id": str(mat.id),
+                "mapped_material_name": mat.name,
+                "mapped_material_uom": mat.unit_of_measure,
+            }
+        return {
+            "activity_id": str(activity.id),
+            "activity_name": activity.name,
+            "activity_category": activity.category,
+            "activity_uom": activity.unit_of_measure,
+            "is_mapped": False,
+            "reason": reason,
+        }
 
     @staticmethod
     async def create_work_entry(
@@ -172,20 +337,50 @@ class DailyWorkService:
                     detail="Work order not found",
                 )
 
-        # Validate quantity non-negative
-        quantity_raw = data_dict.get("quantity", 0)
-        try:
-            quantity = Decimal(str(quantity_raw if quantity_raw is not None else 0))
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="quantity must be a valid number",
-            )
-        if quantity < 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="quantity must be non-negative",
-            )
+        # Process point-to-point measurements if provided
+        measurements_raw = data_dict.get("measurements")
+        measurements_list = []
+        if measurements_raw is not None:
+            if not isinstance(measurements_raw, list):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="measurements must be a list of measurement items",
+                )
+            for m in measurements_raw:
+                try:
+                    if isinstance(m, dict):
+                        m_obj = WorkMeasurementItem(**m)
+                    elif isinstance(m, WorkMeasurementItem):
+                        m_obj = m
+                    else:
+                        m_obj = WorkMeasurementItem.model_validate(m)
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid measurement row: {e}",
+                    )
+                measurements_list.append({
+                    "start_point": m_obj.start_point,
+                    "end_point": m_obj.end_point,
+                    "distance": float(m_obj.distance),
+                })
+            # Quantity must be derived from the measurement table
+            quantity = Decimal(str(sum(Decimal(str(m["distance"])) for m in measurements_list)))
+        else:
+            # Fallback to direct quantity for backwards compatibility
+            quantity_raw = data_dict.get("quantity", 0)
+            try:
+                quantity = Decimal(str(quantity_raw if quantity_raw is not None else 0))
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="quantity must be a valid number",
+                )
+            if quantity < 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="quantity must be non-negative",
+                )
 
         work_date = data_dict.get("work_date") or data_dict.get("date") or active_record.date or today
         remarks = data_dict.get("remarks")
@@ -199,12 +394,75 @@ class DailyWorkService:
             work_order_id=work_order_id,
             work_date=work_date,
             quantity=quantity,
+            measurements=measurements_list if measurements_raw is not None else None,
             uom=uom,
             status="draft",
             remarks=remarks,
         )
         session.add(entry)
         await session.flush()
+
+        # If material_id is provided, validate and attach MaterialTransaction
+        material_id = data_dict.get("material_id")
+        if material_id:
+            if isinstance(material_id, str):
+                material_id = uuid.UUID(material_id)
+            stmt_mat = select(Material).where(Material.id == material_id)
+            res_mat = await session.execute(stmt_mat)
+            mat = res_mat.scalars().first()
+            if not mat:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Selected material not found in master data",
+                )
+            if not mat.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Selected material is inactive",
+                )
+            mat_qty_raw = data_dict.get("material_quantity")
+            if mat_qty_raw is not None:
+                try:
+                    mat_qty = Decimal(str(mat_qty_raw))
+                except Exception:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="material_quantity must be a valid number",
+                    )
+            else:
+                mat_qty = quantity
+
+            if mat_qty > 0:
+                mat_tx = MaterialTransaction(
+                    id=uuid.uuid4(),
+                    daily_work_entry_id=entry.id,
+                    material_id=mat.id,
+                    site_id=entry.site_id,
+                    transaction_type="consumed",
+                    item_name=mat.name,
+                    quantity=mat_qty,
+                    amount=Decimal("0.00"),
+                    is_high_value=False,
+                    status="draft",
+                )
+                session.add(mat_tx)
+        elif quantity > 0:
+            # Auto-link reliably mapped inventory material if configured
+            mapped_mat, _ = await DailyWorkService.find_mapped_inventory_material(session, activity)
+            if mapped_mat:
+                mat_tx = MaterialTransaction(
+                    id=uuid.uuid4(),
+                    daily_work_entry_id=entry.id,
+                    material_id=mapped_mat.id,
+                    site_id=entry.site_id,
+                    transaction_type="consumed",
+                    item_name=mapped_mat.name,
+                    quantity=quantity,
+                    amount=Decimal("0.00"),
+                    is_high_value=False,
+                    status="draft",
+                )
+                session.add(mat_tx)
 
         if user_id:
             audit = AuditLog(
@@ -296,8 +554,53 @@ class DailyWorkService:
                     )
             entry.work_order_id = wo_id
 
-        # Update quantity
-        if "quantity" in data_dict and data_dict["quantity"] is not None:
+        # Update measurements & quantity
+        if "measurements" in data_dict:
+            measurements_raw = data_dict["measurements"]
+            if measurements_raw is not None:
+                if not isinstance(measurements_raw, list):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="measurements must be a list of measurement items",
+                    )
+                measurements_list = []
+                for m in measurements_raw:
+                    try:
+                        if isinstance(m, dict):
+                            m_obj = WorkMeasurementItem(**m)
+                        elif isinstance(m, WorkMeasurementItem):
+                            m_obj = m
+                        else:
+                            m_obj = WorkMeasurementItem.model_validate(m)
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid measurement row: {e}",
+                        )
+                    measurements_list.append({
+                        "start_point": m_obj.start_point,
+                        "end_point": m_obj.end_point,
+                        "distance": float(m_obj.distance),
+                    })
+                entry.measurements = measurements_list
+                entry.quantity = Decimal(str(sum(Decimal(str(m["distance"])) for m in measurements_list)))
+            else:
+                entry.measurements = None
+                if "quantity" in data_dict and data_dict["quantity"] is not None:
+                    try:
+                        val = Decimal(str(data_dict["quantity"]))
+                    except Exception:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="quantity must be a valid number",
+                        )
+                    if val < 0:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="quantity must be non-negative",
+                        )
+                    entry.quantity = val
+        elif "quantity" in data_dict and data_dict["quantity"] is not None:
             try:
                 val = Decimal(str(data_dict["quantity"]))
             except Exception:
@@ -315,6 +618,101 @@ class DailyWorkService:
         # Update remarks
         if "remarks" in data_dict:
             entry.remarks = data_dict["remarks"]
+
+        # Update material if provided
+        if "material_id" in data_dict:
+            mat_id = data_dict["material_id"]
+            if mat_id is not None:
+                if isinstance(mat_id, str):
+                    mat_id = uuid.UUID(mat_id)
+                stmt_mat = select(Material).where(Material.id == mat_id)
+                res_mat = await session.execute(stmt_mat)
+                mat = res_mat.scalars().first()
+                if not mat:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Selected material not found in master data",
+                    )
+                if not mat.is_active:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Selected material is inactive",
+                    )
+                mat_qty_raw = data_dict.get("material_quantity")
+                if mat_qty_raw is not None:
+                    try:
+                        mat_qty = Decimal(str(mat_qty_raw))
+                    except Exception:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="material_quantity must be a valid number",
+                        )
+                else:
+                    mat_qty = entry.quantity
+
+                stmt_existing = select(MaterialTransaction).where(
+                    MaterialTransaction.daily_work_entry_id == entry.id,
+                    MaterialTransaction.transaction_type == "consumed",
+                )
+                res_existing = await session.execute(stmt_existing)
+                existing_txs = list(res_existing.scalars().all())
+                existing_tx = next((t for t in existing_txs if t.material_id == mat.id), None)
+                if not existing_tx:
+                    existing_tx = next((t for t in existing_txs if t.item_name == mat.name), None)
+                if not existing_tx and existing_txs:
+                    existing_tx = existing_txs[0]
+
+                if existing_tx:
+                    existing_tx.material_id = mat.id
+                    existing_tx.item_name = mat.name
+                    existing_tx.quantity = mat_qty
+                    existing_tx.updated_at = datetime.now(timezone.utc)
+                elif mat_qty > 0:
+                    new_tx = MaterialTransaction(
+                        id=uuid.uuid4(),
+                        daily_work_entry_id=entry.id,
+                        material_id=mat.id,
+                        site_id=entry.site_id,
+                        transaction_type="consumed",
+                        item_name=mat.name,
+                        quantity=mat_qty,
+                        amount=Decimal("0.00"),
+                        is_high_value=False,
+                        status="draft",
+                    )
+                    session.add(new_tx)
+        else:
+            # When material_id is not explicitly passed in update, but measurements/quantity changed,
+            # sync matching consumed material transaction's quantity if material_quantity was not specified
+            if ("measurements" in data_dict or "quantity" in data_dict) and "material_quantity" not in data_dict:
+                stmt_act = select(Activity).where(Activity.id == entry.activity_id)
+                res_act = await session.execute(stmt_act)
+                act = res_act.scalars().first()
+
+                matching_tx = await DailyWorkService.find_matching_consumed_material_transaction(
+                    session=session,
+                    entry=entry,
+                    activity=act,
+                )
+                if matching_tx:
+                    matching_tx.quantity = entry.quantity
+                    matching_tx.updated_at = datetime.now(timezone.utc)
+                elif entry.quantity > 0 and act:
+                    mapped_mat, _ = await DailyWorkService.find_mapped_inventory_material(session, act)
+                    if mapped_mat:
+                        new_tx = MaterialTransaction(
+                            id=uuid.uuid4(),
+                            daily_work_entry_id=entry.id,
+                            material_id=mapped_mat.id,
+                            site_id=entry.site_id,
+                            transaction_type="consumed",
+                            item_name=mapped_mat.name,
+                            quantity=entry.quantity,
+                            amount=Decimal("0.00"),
+                            is_high_value=False,
+                            status="draft",
+                        )
+                        session.add(new_tx)
 
         entry.updated_at = datetime.now(timezone.utc)
 
@@ -377,8 +775,19 @@ class DailyWorkService:
             )
 
         old_status = entry.status
+        now = datetime.now(timezone.utc)
         entry.status = "submitted"
-        entry.updated_at = datetime.now(timezone.utc)
+        entry.updated_at = now
+
+        # Cascade submission to eligible linked material transactions (draft or correction_required)
+        stmt_mats = select(MaterialTransaction).where(
+            MaterialTransaction.daily_work_entry_id == entry.id,
+            MaterialTransaction.status.in_(EDITABLE_STATUSES),
+        )
+        res_mats = await session.execute(stmt_mats)
+        for mat in res_mats.scalars().all():
+            mat.status = "submitted"
+            mat.updated_at = now
 
         if user_id:
             audit = AuditLog(

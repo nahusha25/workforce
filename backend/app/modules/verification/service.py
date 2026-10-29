@@ -23,11 +23,14 @@ from app.models.operations import (
     WorkOrder,
     WorkPhoto,
 )
+from app.models.material_inventory import MaterialStock, MaterialStockMovement
 from app.models.system import AuditLog
 from app.models.workforce import Employee
 from app.modules.verification.exceptions import (
+    InsufficientMaterialStockError,
     InvalidVerificationStateError,
     MandatoryRemarksRequiredError,
+    MissingCatalogueMaterialError,
     TargetNotFoundError,
     UnauthorizedSupervisorError,
 )
@@ -577,6 +580,7 @@ class VerificationService:
                     uom=dwe.uom,
                     status=dwe.status,
                     remarks=dwe.remarks,
+                    measurements=dwe.measurements or [],
                     verification_record_id=latest_dwe_vr.id if latest_dwe_vr else None,
                     verification_action=latest_dwe_vr.action if latest_dwe_vr else None,
                     verification_remarks=latest_dwe_vr.remarks if latest_dwe_vr else None,
@@ -716,7 +720,285 @@ class VerificationService:
             if not cleaned_remarks or len(cleaned_remarks) < 10:
                 raise MandatoryRemarksRequiredError(action)
 
-        # 5. Apply Status Transition
+        # 5. Inventory Stock Management for Material Transactions
+        stock_balance_after: Optional[Decimal] = None
+
+        if norm_entity == "material" and getattr(target_obj, "transaction_type", None) == "consumed":
+            if action == "approved":
+                # 1. Require valid catalogue material ID
+                if not target_obj.material_id:
+                    raise MissingCatalogueMaterialError(
+                        "Consumed material transaction cannot be approved without a valid catalogue material."
+                    )
+
+                # 2. Verify material exists and is active
+                stmt_mat = select(Material).where(Material.id == target_obj.material_id)
+                res_mat = await session.execute(stmt_mat)
+                material = res_mat.scalars().first()
+                if not material:
+                    raise MissingCatalogueMaterialError(
+                        f"Consumed material '{target_obj.material_id}' was not found in the materials catalogue."
+                    )
+                if not material.is_active:
+                    raise InvalidVerificationStateError(
+                        f"Cannot approve consumption: material '{material.name}' is inactive in catalogue."
+                    )
+
+                # 3. Lock MaterialStock row using SELECT ... FOR UPDATE
+                stmt_stock = (
+                    select(MaterialStock)
+                    .where(
+                        MaterialStock.site_id == target_obj.site_id,
+                        MaterialStock.material_id == target_obj.material_id,
+                    )
+                    .with_for_update()
+                )
+                res_stock = await session.execute(stmt_stock)
+                stock = res_stock.scalars().first()
+
+                consumed_qty = Decimal(str(target_obj.quantity))
+                available_qty = stock.quantity if stock else Decimal("0.00")
+
+                # 4. Check sufficient stock
+                if stock is None or stock.quantity < consumed_qty:
+                    raise InsufficientMaterialStockError(
+                        f"Insufficient stock for material '{material.name}' at site. Available: {available_qty}, required: {consumed_qty}."
+                    )
+
+                # 5. Decrement stock
+                stock.quantity = stock.quantity - consumed_qty
+                stock.updated_at = datetime.now(timezone.utc)
+                stock_balance_after = stock.quantity
+
+                # 6. Record consumed movement
+                consume_movement = MaterialStockMovement(
+                    site_id=target_obj.site_id,
+                    material_id=target_obj.material_id,
+                    movement_type="consumed",
+                    quantity=consumed_qty,
+                    balance_after=stock.quantity,
+                    material_transaction_id=target_obj.id,
+                    idempotency_key=f"CONSUME-{idempotency_key}"[:100],
+                    remarks=f"Consumption approved: {material.name} ({consumed_qty})",
+                    created_by=supervisor_user_id,
+                    created_at=datetime.now(timezone.utc),
+                )
+                session.add(consume_movement)
+
+            elif action == "correction_required" and current_status == target_success_status:
+                # Reopening an approved consumption reverses stock deduction atomically
+                if target_obj.material_id:
+                    stmt_stock = (
+                        select(MaterialStock)
+                        .where(
+                            MaterialStock.site_id == target_obj.site_id,
+                            MaterialStock.material_id == target_obj.material_id,
+                        )
+                        .with_for_update()
+                    )
+                    res_stock = await session.execute(stmt_stock)
+                    stock = res_stock.scalars().first()
+                    if not stock:
+                        stock = MaterialStock(
+                            site_id=target_obj.site_id,
+                            material_id=target_obj.material_id,
+                            quantity=Decimal("0.00"),
+                        )
+                        session.add(stock)
+
+                    consumed_qty = Decimal(str(target_obj.quantity))
+                    stock.quantity = stock.quantity + consumed_qty
+                    stock.updated_at = datetime.now(timezone.utc)
+                    stock_balance_after = stock.quantity
+
+                    return_movement = MaterialStockMovement(
+                        site_id=target_obj.site_id,
+                        material_id=target_obj.material_id,
+                        movement_type="returned",
+                        quantity=consumed_qty,
+                        balance_after=stock.quantity,
+                        material_transaction_id=target_obj.id,
+                        idempotency_key=f"RETURN-{idempotency_key}"[:100],
+                        remarks=f"Consumption reversed on reopen: {target_obj.item_name} ({consumed_qty})",
+                        created_by=supervisor_user_id,
+                        created_at=datetime.now(timezone.utc),
+                    )
+                    session.add(return_movement)
+
+        elif norm_entity == "daily_work":
+            stmt_mats = select(MaterialTransaction).where(MaterialTransaction.daily_work_entry_id == target_obj.id)
+            res_mats = await session.execute(stmt_mats)
+            linked_mats = list(res_mats.scalars().all())
+
+            if action == "approved":
+                for mat in linked_mats:
+                    if mat.transaction_type == "consumed":
+                        if mat.status == "approved":
+                            # Already approved and deducted, skip to prevent double deduction
+                            continue
+
+                        if not mat.material_id:
+                            raise MissingCatalogueMaterialError(
+                                f"Consumed material transaction '{mat.id}' cannot be approved without a valid catalogue material."
+                            )
+
+                        stmt_mat = select(Material).where(Material.id == mat.material_id)
+                        res_mat = await session.execute(stmt_mat)
+                        material = res_mat.scalars().first()
+                        if not material:
+                            raise MissingCatalogueMaterialError(
+                                f"Consumed material '{mat.material_id}' was not found in the materials catalogue."
+                            )
+                        if not material.is_active:
+                            raise InvalidVerificationStateError(
+                                f"Cannot approve consumption: material '{material.name}' is inactive in catalogue."
+                            )
+
+                        stmt_stock = (
+                            select(MaterialStock)
+                            .where(
+                                MaterialStock.site_id == mat.site_id,
+                                MaterialStock.material_id == mat.material_id,
+                            )
+                            .with_for_update()
+                        )
+                        res_stock = await session.execute(stmt_stock)
+                        stock = res_stock.scalars().first()
+
+                        consumed_qty = Decimal(str(mat.quantity))
+                        available_qty = stock.quantity if stock else Decimal("0.00")
+
+                        if stock is None or stock.quantity < consumed_qty:
+                            raise InsufficientMaterialStockError(
+                                f"Insufficient stock for material '{material.name}' at site. Available: {available_qty}, required: {consumed_qty}."
+                            )
+
+                        stock.quantity = stock.quantity - consumed_qty
+                        stock.updated_at = datetime.now(timezone.utc)
+                        stock_balance_after = stock.quantity
+
+                        consume_movement = MaterialStockMovement(
+                            site_id=mat.site_id,
+                            material_id=mat.material_id,
+                            movement_type="consumed",
+                            quantity=consumed_qty,
+                            balance_after=stock.quantity,
+                            material_transaction_id=mat.id,
+                            idempotency_key=f"DWE-C-{idempotency_key[:40]}-{str(mat.id)[:36]}"[:100],
+                            remarks=f"Work entry approved: {material.name} ({consumed_qty}) for work entry {target_obj.id}",
+                            created_by=supervisor_user_id,
+                            created_at=datetime.now(timezone.utc),
+                        )
+                        session.add(consume_movement)
+
+                        mat.status = "approved"
+                        mat.updated_at = datetime.now(timezone.utc)
+                        vr_mat = VerificationRecord(
+                            idempotency_key=f"DWE-V-{idempotency_key[:40]}-{str(mat.id)[:36]}"[:100],
+                            material_transaction_id=mat.id,
+                            verified_by=supervisor_user_id,
+                            action="approved",
+                            remarks=f"Auto-approved via work entry approval {target_obj.id}",
+                            verified_at=datetime.now(timezone.utc),
+                        )
+                        session.add(vr_mat)
+
+            elif action == "rejected":
+                for mat in linked_mats:
+                    if mat.transaction_type == "consumed" and mat.status in ("submitted", "draft", "flagged"):
+                        mat.status = "rejected"
+                        mat.updated_at = datetime.now(timezone.utc)
+                        vr_mat = VerificationRecord(
+                            idempotency_key=f"DWE-R-{idempotency_key[:40]}-{str(mat.id)[:36]}"[:100],
+                            material_transaction_id=mat.id,
+                            verified_by=supervisor_user_id,
+                            action="rejected",
+                            remarks=cleaned_remarks,
+                            verified_at=datetime.now(timezone.utc),
+                        )
+                        session.add(vr_mat)
+
+            elif action == "correction_required":
+                if current_status == target_success_status:
+                    # Reopening an approved work entry reverses any approved consumed materials
+                    for mat in linked_mats:
+                        if mat.status == "approved" and mat.transaction_type == "consumed" and mat.material_id:
+                            stmt_stock = (
+                                select(MaterialStock)
+                                .where(
+                                    MaterialStock.site_id == mat.site_id,
+                                    MaterialStock.material_id == mat.material_id,
+                                )
+                                .with_for_update()
+                            )
+                            res_stock = await session.execute(stmt_stock)
+                            stock = res_stock.scalars().first()
+                            if not stock:
+                                stock = MaterialStock(
+                                    site_id=mat.site_id,
+                                    material_id=mat.material_id,
+                                    quantity=Decimal("0.00"),
+                                )
+                                session.add(stock)
+
+                            consumed_qty = Decimal(str(mat.quantity))
+                            stock.quantity = stock.quantity + consumed_qty
+                            stock.updated_at = datetime.now(timezone.utc)
+                            stock_balance_after = stock.quantity
+
+                            return_movement = MaterialStockMovement(
+                                site_id=mat.site_id,
+                                material_id=mat.material_id,
+                                movement_type="returned",
+                                quantity=consumed_qty,
+                                balance_after=stock.quantity,
+                                material_transaction_id=mat.id,
+                                idempotency_key=f"DWE-RET-{idempotency_key[:40]}-{str(mat.id)[:36]}"[:100],
+                                remarks=f"Work entry reopen: {mat.item_name} ({consumed_qty}) returned",
+                                created_by=supervisor_user_id,
+                                created_at=datetime.now(timezone.utc),
+                            )
+                            session.add(return_movement)
+
+                            mat.status = "correction_required"
+                            mat.updated_at = datetime.now(timezone.utc)
+                            vr_mat = VerificationRecord(
+                                idempotency_key=f"DWE-REO-{idempotency_key[:40]}-{str(mat.id)[:36]}"[:100],
+                                material_transaction_id=mat.id,
+                                verified_by=supervisor_user_id,
+                                action="correction_required",
+                                remarks=cleaned_remarks,
+                                verified_at=datetime.now(timezone.utc),
+                            )
+                            session.add(vr_mat)
+                        elif mat.status in ("submitted", "draft", "flagged"):
+                            mat.status = "correction_required"
+                            mat.updated_at = datetime.now(timezone.utc)
+                            vr_mat = VerificationRecord(
+                                idempotency_key=f"DWE-REO-{idempotency_key[:40]}-{str(mat.id)[:36]}"[:100],
+                                material_transaction_id=mat.id,
+                                verified_by=supervisor_user_id,
+                                action="correction_required",
+                                remarks=cleaned_remarks,
+                                verified_at=datetime.now(timezone.utc),
+                            )
+                            session.add(vr_mat)
+                else:
+                    for mat in linked_mats:
+                        if mat.status in ("submitted", "draft", "flagged"):
+                            mat.status = "correction_required"
+                            mat.updated_at = datetime.now(timezone.utc)
+                            vr_mat = VerificationRecord(
+                                idempotency_key=f"DWE-REO-{idempotency_key[:40]}-{str(mat.id)[:36]}"[:100],
+                                material_transaction_id=mat.id,
+                                verified_by=supervisor_user_id,
+                                action="correction_required",
+                                remarks=cleaned_remarks,
+                                verified_at=datetime.now(timezone.utc),
+                            )
+                            session.add(vr_mat)
+
+        # 6. Apply Status Transition
         old_status = current_status
         new_status = ""
         if action == "approved":
@@ -728,7 +1010,7 @@ class VerificationService:
 
         target_obj.status = new_status
 
-        # 6. Insert VerificationRecord
+        # 7. Insert VerificationRecord
         vr = VerificationRecord(
             idempotency_key=idempotency_key,
             attendance_record_id=entity_id if norm_entity == "attendance" else None,
@@ -741,7 +1023,7 @@ class VerificationService:
         )
         session.add(vr)
 
-        # 7. Insert System AuditLog
+        # 8. Insert System AuditLog
         audit_entity = (
             "attendance_record"
             if norm_entity == "attendance"
@@ -749,17 +1031,21 @@ class VerificationService:
             if norm_entity == "daily_work"
             else "material_transaction"
         )
+        audit_new_values = {
+            "status": new_status,
+            "verification_record_id": str(vr.id),
+            "remarks": cleaned_remarks,
+        }
+        if stock_balance_after is not None:
+            audit_new_values["stock_balance_after"] = str(stock_balance_after)
+
         audit = AuditLog(
             entity_type=audit_entity,
             entity_id=entity_id,
             action=f"verify_{action}",
             changed_by=supervisor_user_id,
             previous_values={"status": old_status},
-            new_values={
-                "status": new_status,
-                "verification_record_id": str(vr.id),
-                "remarks": cleaned_remarks,
-            },
+            new_values=audit_new_values,
         )
         session.add(audit)
 
@@ -778,6 +1064,9 @@ class VerificationService:
             if existing_vr:
                 target_status = await VerificationService._get_target_status(session, norm_entity, entity_id)
                 return existing_vr, target_status, True
+            raise
+        except Exception:
+            await session.rollback()
             raise
 
     @staticmethod

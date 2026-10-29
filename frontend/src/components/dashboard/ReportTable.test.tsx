@@ -39,8 +39,8 @@ describe('ReportTable', () => {
 
     expect(screen.getByText('Rajesh Kumar')).toBeTruthy();
     expect(screen.getByText('Metro Site')).toBeTruthy();
-    expect(screen.getByText('8.00h')).toBeTruthy();
-    expect(screen.getByText('1.50h')).toBeTruthy();
+    expect(screen.getByText('8 hrs')).toBeTruthy();
+    expect(screen.getByText('1 hr 30 min')).toBeTruthy();
     expect(screen.getByText('Inside')).toBeTruthy();
     expect(screen.getByText('approved')).toBeTruthy();
   });
@@ -117,7 +117,7 @@ describe('ReportTable', () => {
     );
 
     expect(screen.getByText('Amit Patel')).toBeTruthy();
-    expect(screen.getByText('40.00 hrs')).toBeTruthy();
+    expect(screen.getByText('40 hrs')).toBeTruthy();
 
     // Verify both categories appear with separate UOM and ratio labels
     expect(screen.getByTestId('cat-tag-cable')).toBeTruthy();

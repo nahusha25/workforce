@@ -35,13 +35,22 @@ class EmployeeService:
             mobile_id=employee.mobile_id,
             name=employee.name,
             system_role=system_role,
+            classification=getattr(employee, "classification", "regular") or "regular",
             supervisor_id=employee.supervisor_id,
             is_active=employee.is_active,
             created_at=employee.created_at,
             updated_at=employee.updated_at,
             trade_roles=[RoleBriefResponse(id=r.id, name=r.name) for r in trade_roles],
             current_rate=RateHistoryResponse.model_validate(current_rate) if current_rate else None,
-            active_sites=[SiteBriefResponse(id=s.id, name=s.name) for s in active_sites],
+            active_sites=[
+                SiteBriefResponse(
+                    id=s.id,
+                    name=s.name,
+                    project_id=getattr(s, "project_id", None),
+                    project_name=getattr(s, "project_name", None),
+                )
+                for s in active_sites
+            ],
         )
 
     async def create_employee(self, emp_in: EmployeeCreate, admin_user: User) -> EmployeeResponse:
@@ -62,13 +71,38 @@ class EmployeeService:
             if not supervisor or not supervisor.is_active:
                 raise NotFoundError(f"Active supervisor with ID {emp_in.supervisor_id} not found")
 
-        roles = await self.repo.get_roles_by_ids(emp_in.trade_role_ids)
-        if len(roles) != len(set(emp_in.trade_role_ids)):
-            raise NotFoundError("One or more specified trade roles do not exist")
+        # Employee classification:
+        classification = emp_in.classification or "regular"
 
-        sites = await self.repo.get_sites_by_ids(emp_in.site_ids)
-        if len(sites) != len(set(emp_in.site_ids)):
-            raise NotFoundError("One or more specified sites do not exist")
+        # Contract employees must have at least one assigned site/project
+        if classification == "contract" and not emp_in.site_ids:
+            raise BusinessRuleError("At least one assigned client site or project is mandatory for contract employees")
+
+        # Rate frequency validation: monthly is the only supported pay frequency
+        if emp_in.rate_type != "monthly":
+            raise BusinessRuleError("Only monthly pay frequency is supported for employees")
+
+        # Conditional trade role validation:
+        # Mandatory for employee (field worker), optional for supervisor, director, administrator
+        if emp_in.system_role == "employee" and not emp_in.trade_role_ids:
+            raise BusinessRuleError("Trade / Job Role is mandatory for employee (field worker)")
+
+        # Conditional client site validation:
+        # Mandatory for employee (field worker) and supervisor, optional for director and administrator
+        if emp_in.system_role in ("employee", "supervisor") and not emp_in.site_ids:
+            raise BusinessRuleError("At least one assigned client site is mandatory for employee and supervisor roles")
+
+        roles = []
+        if emp_in.trade_role_ids:
+            roles = await self.repo.get_roles_by_ids(emp_in.trade_role_ids)
+            if len(roles) != len(set(emp_in.trade_role_ids)):
+                raise NotFoundError("One or more specified trade roles do not exist")
+
+        sites = []
+        if emp_in.site_ids:
+            sites = await self.repo.get_sites_by_ids(emp_in.site_ids)
+            if len(sites) != len(set(emp_in.site_ids)):
+                raise NotFoundError("One or more specified sites do not exist")
 
         user = User(
             mobile_id=emp_in.mobile_number,
@@ -84,6 +118,7 @@ class EmployeeService:
             name=emp_in.name,
             supervisor_id=emp_in.supervisor_id,
             is_active=True,
+            classification=classification,
         )
 
         # Ensure changed_by_id points to an employee ID (either admin_emp.id or new employee.id)
@@ -100,15 +135,20 @@ class EmployeeService:
         created_employee = await self.repo.create_employee_atomic(
             user=user,
             employee=employee,
-            role_ids=emp_in.trade_role_ids,
+            role_ids=emp_in.trade_role_ids or [],
             rate_history=rate_history,
-            site_ids=emp_in.site_ids,
+            site_ids=emp_in.site_ids or [],
         )
 
         return await self._format_employee_response(created_employee)
 
     async def get_employees(
-        self, current_user: User, skip: int = 0, limit: int = 100
+        self,
+        current_user: User,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: bool | None = None,
+        classification: str | None = None,
     ) -> list[EmployeeResponse]:
         supervisor_id_filter = None
         if current_user.role == "supervisor":
@@ -117,7 +157,13 @@ class EmployeeService:
                 return []
             supervisor_id_filter = sup_emp.id
 
-        employees = await self.repo.get_employees(skip=skip, limit=limit, supervisor_id=supervisor_id_filter)
+        employees = await self.repo.get_employees(
+            skip=skip,
+            limit=limit,
+            supervisor_id=supervisor_id_filter,
+            is_active=is_active,
+            classification=classification,
+        )
         res = []
         for emp in employees:
             res.append(await self._format_employee_response(emp))
@@ -204,20 +250,60 @@ class EmployeeService:
                 await self.repo.update_user(user)
 
         if emp_update.trade_role_ids is not None:
-            roles = await self.repo.get_roles_by_ids(emp_update.trade_role_ids)
-            if len(roles) != len(set(emp_update.trade_role_ids)):
-                raise NotFoundError("One or more specified trade roles do not exist")
+            user = await self.repo.get_user_by_id(employee.user_id)
+            target_role = emp_update.system_role or (user.role if user else "employee")
+            if target_role == "employee" and len(emp_update.trade_role_ids) == 0:
+                raise BusinessRuleError("Trade / Job Role is mandatory for employee (field worker)")
+
+            roles = []
+            if emp_update.trade_role_ids:
+                roles = await self.repo.get_roles_by_ids(emp_update.trade_role_ids)
+                if len(roles) != len(set(emp_update.trade_role_ids)):
+                    raise NotFoundError("One or more specified trade roles do not exist")
             await self.repo.set_employee_trade_roles(employee.id, emp_update.trade_role_ids)
 
+        if emp_update.system_role == "employee" and emp_update.trade_role_ids is None:
+            existing_roles = await self.repo.get_employee_trade_roles(employee.id)
+            if not existing_roles:
+                raise BusinessRuleError("Trade / Job Role is mandatory for employee (field worker)")
+
         if emp_update.site_ids is not None:
-            sites = await self.repo.get_sites_by_ids(emp_update.site_ids)
-            if len(sites) != len(set(emp_update.site_ids)):
-                raise NotFoundError("One or more specified sites do not exist")
+            user = await self.repo.get_user_by_id(employee.user_id)
+            target_role = emp_update.system_role or (user.role if user else "employee")
+            if target_role in ("employee", "supervisor") and len(emp_update.site_ids) == 0:
+                raise BusinessRuleError("At least one assigned client site is mandatory for employee and supervisor roles")
+
+            sites = []
+            if emp_update.site_ids:
+                sites = await self.repo.get_sites_by_ids(emp_update.site_ids)
+                if len(sites) != len(set(emp_update.site_ids)):
+                    raise NotFoundError("One or more specified sites do not exist")
             await self.repo.set_employee_site_assignments(employee.id, emp_update.site_ids)
+
+        if emp_update.system_role in ("employee", "supervisor") and emp_update.site_ids is None:
+            existing_sites = await self.repo.get_active_assigned_sites(employee.id)
+            if not existing_sites:
+                raise BusinessRuleError("At least one assigned client site is mandatory for employee and supervisor roles")
+
+        if emp_update.classification is not None:
+            employee.classification = emp_update.classification
+
+        target_classification = emp_update.classification or getattr(employee, "classification", "regular")
+        if target_classification == "contract":
+            if emp_update.site_ids is not None and len(emp_update.site_ids) == 0:
+                raise BusinessRuleError("At least one assigned client site or project is mandatory for contract employees")
+            elif emp_update.site_ids is None:
+                existing_sites = await self.repo.get_active_assigned_sites(employee.id)
+                if not existing_sites:
+                    raise BusinessRuleError("At least one assigned client site or project is mandatory for contract employees")
+
+        if emp_update.rate_type is not None:
+            if emp_update.rate_type != "monthly":
+                raise BusinessRuleError("Only monthly pay frequency is supported for employees")
 
         if emp_update.rate_type is not None or emp_update.rate_amount is not None:
             current_rate = await self.repo.get_active_rate_history(employee.id)
-            new_type = emp_update.rate_type if emp_update.rate_type is not None else (current_rate.rate_type if current_rate else "daily")
+            new_type = emp_update.rate_type if emp_update.rate_type is not None else (current_rate.rate_type if current_rate else "monthly")
             new_amount = emp_update.rate_amount if emp_update.rate_amount is not None else (float(current_rate.rate_amount) if current_rate else 0.0)
 
             admin_emp = await self.repo.get_employee_by_user_id(admin_user.id)
@@ -257,7 +343,7 @@ class EmployeeService:
         await self.repo.add_site_assignment(assignment)
         return await self._format_employee_response(employee)
 
-    async def delete_employee(self, employee_id: uuid.UUID, admin_user: User) -> None:
+    async def delete_employee(self, employee_id: uuid.UUID, admin_user: User) -> dict[str, str]:
         employee = await self.repo.get_employee_by_id(employee_id)
         if not employee:
             raise NotFoundError(f"Employee with ID {employee_id} not found")
@@ -265,4 +351,23 @@ class EmployeeService:
         if employee.user_id == admin_user.id:
             raise BusinessRuleError("Cannot delete your own administrator account")
 
+        has_records = await self.repo.has_historical_records(employee.id, employee.user_id)
+        if has_records:
+            was_active = employee.is_active
+            await self.repo.deactivate_employee_atomic(employee.id, employee.user_id)
+            if was_active:
+                msg = f"Employee {employee.name} ({employee.employee_code}) has historical records and was deactivated successfully."
+            else:
+                msg = f"Employee {employee.name} ({employee.employee_code}) is already deactivated and historical records are preserved."
+            return {
+                "status": "success",
+                "message": msg,
+                "action": "deactivated",
+            }
+
         await self.repo.delete_employee_atomic(employee.id, employee.user_id)
+        return {
+            "status": "success",
+            "message": f"Employee {employee.name} ({employee.employee_code}) deleted successfully.",
+            "action": "deleted",
+        }

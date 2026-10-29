@@ -12,12 +12,12 @@ class AuthRepository:
         self.db = db
 
     async def get_user_by_mobile(self, mobile_id: str) -> User | None:
-        stmt = select(User).where(User.mobile_id == mobile_id, User.is_active == True)
+        stmt = select(User).where(User.mobile_id == mobile_id)
         result = await self.db.execute(stmt)
         return result.scalars().first()
 
     async def get_user_by_id(self, user_id: uuid.UUID) -> User | None:
-        stmt = select(User).where(User.id == user_id, User.is_active == True)
+        stmt = select(User).where(User.id == user_id)
         result = await self.db.execute(stmt)
         return result.scalars().first()
 

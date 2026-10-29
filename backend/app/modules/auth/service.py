@@ -28,6 +28,9 @@ class AuthService:
             # Prevent user enumeration: do not throw error, simply return as if SMS was sent
             return
 
+        if not user.is_active:
+            raise AuthError("Account is deactivated. Please contact your administrator.")
+
         # Generate 6 digit OTP
         otp_plain = f"{random.randint(100000, 999999)}"
         otp_hash = get_otp_hash(otp_plain)
@@ -50,6 +53,9 @@ class AuthService:
         user = await self.repo.get_user_by_mobile(mobile)
         if not user:
             raise AuthError("Invalid credentials")
+
+        if not user.is_active:
+            raise AuthError("Account is deactivated. Please contact your administrator.")
 
         otp_record = await self.repo.get_latest_otp(user.id)
         if not otp_record:
@@ -105,7 +111,7 @@ class AuthService:
 
         user = await self.repo.get_user_by_id(rt_record.user_id)
         if not user or not user.is_active:
-            raise AuthError("User inactive")
+            raise AuthError("Account is deactivated. Please contact your administrator.")
 
         # Rotate tokens
         await self.repo.revoke_refresh_tokens_for_user(user.id)

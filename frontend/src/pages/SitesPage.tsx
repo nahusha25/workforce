@@ -16,6 +16,8 @@ import { Input } from '../components/ui/Input';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { Select } from '../components/ui/Select';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { LocationPicker } from '../components/location/LocationPicker';
+import { parsePointWkt, formatCoordinatesDisplay } from '../utils/geo';
 import { useAuth } from '../context/AuthContext';
 
 export const SitesPage: React.FC = () => {
@@ -42,6 +44,7 @@ export const SitesPage: React.FC = () => {
   const [address, setAddress] = useState<string>('');
   const [location, setLocation] = useState<string>('');
   const [permittedRadiusM, setPermittedRadiusM] = useState<string>('100');
+  const [intendedForGps, setIntendedForGps] = useState<boolean>(true);
   const [isActive, setIsActive] = useState<boolean>(true);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -70,6 +73,7 @@ export const SitesPage: React.FC = () => {
     setAddress('');
     setLocation('');
     setPermittedRadiusM('100');
+    setIntendedForGps(true);
     setIsActive(true);
     if (projects.length > 0) {
       setProjectId(projects[0].id);
@@ -92,6 +96,7 @@ export const SitesPage: React.FC = () => {
     setProjectId(site.project_id);
     setAddress(site.address || '');
     setLocation(site.location || '');
+    setIntendedForGps(Boolean(site.location));
     setPermittedRadiusM(site.permitted_radius_m !== null && site.permitted_radius_m !== undefined ? String(site.permitted_radius_m) : '100');
     setIsActive(site.is_active);
     setShowForm(true);
@@ -114,19 +119,41 @@ export const SitesPage: React.FC = () => {
     }
 
     const radiusVal = permittedRadiusM ? parseFloat(permittedRadiusM) : undefined;
-    if (radiusVal !== undefined && (isNaN(radiusVal) || radiusVal < 0)) {
+    if (radiusVal !== undefined && (isNaN(radiusVal) || radiusVal <= 0)) {
       setFormError('Permitted radius must be a positive number');
       return;
     }
 
+    // Geofenced location validation:
+    // Sites intended for GPS attendance must have a valid location
+    if (intendedForGps) {
+      if (!location.trim()) {
+        setFormError('Please select a valid site location on the map for GPS geofenced attendance');
+        return;
+      }
+      const parsed = parsePointWkt(location.trim());
+      if (!parsed) {
+        setFormError('Invalid location coordinates. Please select a valid point on the map');
+        return;
+      }
+    } else if (location.trim()) {
+      const parsed = parsePointWkt(location.trim());
+      if (!parsed) {
+        setFormError('Invalid location coordinates format');
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
+      const locationToSave = location.trim() ? location.trim() : null;
+
       if (editingId) {
         await updateSiteApi(editingId, {
           name: name.trim(),
           project_id: projectId,
           address: address.trim() || null,
-          location: location.trim() || null,
+          location: locationToSave,
           permitted_radius_m: radiusVal,
           is_active: isActive,
         });
@@ -136,7 +163,7 @@ export const SitesPage: React.FC = () => {
           name: name.trim(),
           project_id: projectId,
           address: address.trim() || undefined,
-          location: location.trim() || undefined,
+          location: locationToSave || undefined,
           permitted_radius_m: radiusVal,
           is_active: true,
         });
@@ -230,23 +257,51 @@ export const SitesPage: React.FC = () => {
               onChange={(e) => setAddress(e.target.value)}
               data-testid="site-address-input"
             />
-            <Input
-              label="Location (GPS / Address)"
-              placeholder="e.g. 12.9716, 77.5946"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              data-testid="site-location-input"
-            />
-            <Input
-              label="Permitted Radius (meters)"
-              type="number"
-              min="0"
-              placeholder="100"
-              value={permittedRadiusM}
-              onChange={(e) => setPermittedRadiusM(e.target.value)}
-              inputMode="numeric"
-              data-testid="site-radius-input"
-            />
+            {/* GPS Attendance Geofence Location Picker */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                <label style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--color-neutral-800)' }}>
+                  Site Location & Attendance Geofence {intendedForGps && <span style={{ color: 'var(--color-error)' }}>*</span>}
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    id="site-gps-toggle"
+                    checked={intendedForGps}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIntendedForGps(checked);
+                      if (!checked && !editingId) {
+                        setLocation('');
+                      }
+                    }}
+                    data-testid="site-gps-checkbox"
+                  />
+                  <label htmlFor="site-gps-toggle" style={{ fontSize: 'var(--font-size-xs)', fontWeight: 500, cursor: 'pointer', color: 'var(--color-neutral-700)' }}>
+                    Require GPS Geofencing for Attendance
+                  </label>
+                </div>
+              </div>
+
+              <LocationPicker
+                value={location || null}
+                onChange={(newWkt) => {
+                  setLocation(newWkt || '');
+                  if (newWkt) {
+                    setIntendedForGps(true);
+                  }
+                }}
+                radiusMeters={permittedRadiusM ? parseFloat(permittedRadiusM) || 100 : 100}
+                onRadiusChange={(r) => setPermittedRadiusM(String(r))}
+                onAddressSelect={(suggestedAddr) => {
+                  if (!address.trim()) {
+                    setAddress(suggestedAddr);
+                  }
+                }}
+                radiusTestId="site-radius-input"
+              />
+              <input type="hidden" value={location} data-testid="site-location-input" />
+            </div>
             {editingId && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: 'var(--font-size-sm)' }}>
                 <input
@@ -296,6 +351,17 @@ export const SitesPage: React.FC = () => {
                 {site.address && (
                   <div>
                     <strong>Address:</strong> {site.address}
+                  </div>
+                )}
+                {site.location && (
+                  <div>
+                    <strong>Location:</strong>{' '}
+                    <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 'var(--font-size-xs)' }}>
+                      {(() => {
+                        const parsed = parsePointWkt(site.location);
+                        return parsed ? formatCoordinatesDisplay(parsed.lat, parsed.lng) : site.location;
+                      })()}
+                    </span>
                   </div>
                 )}
                 {site.permitted_radius_m !== null && site.permitted_radius_m !== undefined && (

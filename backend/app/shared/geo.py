@@ -52,3 +52,75 @@ def is_within_geofence(
     distance = calculate_distance_metres(emp_lat, emp_lng, site_lat, site_lng)
     
     return distance <= radius_metres
+
+
+def parse_location_to_lat_lng(location) -> tuple[float | None, float | None]:
+    """
+    Safely extracts (latitude, longitude) as floats from various location formats:
+    - GeoAlchemy2 WKBElement (as loaded from PostGIS geography columns)
+    - Raw WKB bytes or memoryview
+    - OGC WKT strings such as 'POINT(longitude latitude)'
+
+    Guarantees:
+    - Returns (None, None) if location is missing, empty, malformed, or (0, 0).
+    - Never substitutes default or fake coordinates.
+    - Accurately respects WKT/WKB axis order (X = longitude, Y = latitude).
+    """
+    if location is None:
+        return None, None
+
+    import struct
+
+    wkb_bytes = None
+    if hasattr(location, "data") and isinstance(location.data, (bytes, bytearray, memoryview)):
+        wkb_bytes = bytes(location.data)
+    elif isinstance(location, (bytes, bytearray, memoryview)):
+        wkb_bytes = bytes(location)
+    elif isinstance(location, str) and not location.strip().upper().startswith("POINT"):
+        trimmed = location.strip()
+        if len(trimmed) >= 42:
+            try:
+                wkb_bytes = bytes.fromhex(trimmed)
+            except ValueError:
+                wkb_bytes = None
+
+    if wkb_bytes and len(wkb_bytes) >= 21:
+        try:
+            byte_order = "<" if wkb_bytes[0] == 1 else ">"
+            geom_type = struct.unpack(f"{byte_order}I", wkb_bytes[1:5])[0]
+            offset = 5
+            # EWKB flag: 0x20000000 indicates 4-byte SRID prefix
+            if geom_type & 0x20000000:
+                offset += 4
+                geom_type &= ~0x20000000
+
+            if geom_type == 1:  # Point
+                x, y = struct.unpack(f"{byte_order}dd", wkb_bytes[offset : offset + 16])
+                # Strictly guard against (0, 0)
+                if abs(x) < 1e-6 and abs(y) < 1e-6:
+                    return None, None
+                if -90.0 <= y <= 90.0 and -180.0 <= x <= 180.0:
+                    return round(float(y), 7), round(float(x), 7)
+        except Exception:
+            pass
+
+    # 2. Handle OGC WKT string (e.g., 'POINT(77.50956 12.96629)')
+    if isinstance(location, str):
+        trimmed = location.strip()
+        if trimmed.upper().startswith("POINT") and "(" in trimmed and ")" in trimmed:
+            try:
+                content = trimmed[trimmed.index("(") + 1 : trimmed.rindex(")")].strip()
+                parts = content.split()
+                if len(parts) >= 2:
+                    lng = float(parts[0])
+                    lat = float(parts[1])
+                    # Strictly guard against (0, 0)
+                    if abs(lat) < 1e-6 and abs(lng) < 1e-6:
+                        return None, None
+                    if -90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0:
+                        return round(lat, 7), round(lng, 7)
+            except Exception:
+                pass
+
+    return None, None
+

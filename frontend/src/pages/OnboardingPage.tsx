@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { createEmployeeApi, getEmployeesApi, type EmployeeResponseData } from '../api/employee';
+import {
+  createEmployeeApi,
+  getEmployeesApi,
+  type EmployeeClassification,
+  type EmployeeResponseData,
+} from '../api/employee';
 import { getRolesApi, getSitesApi, type RoleResponseData, type SiteResponseData } from '../api/masterData';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -29,10 +34,11 @@ export const OnboardingPage: React.FC = () => {
   const [name, setName] = useState<string>('');
   const [mobileNumber, setMobileNumber] = useState<string>('');
   const [employeeCode, setEmployeeCode] = useState<string>('');
+  const [classification, setClassification] = useState<EmployeeClassification>('regular');
   const [systemRole, setSystemRole] = useState<SystemRole>('employee');
   const [selectedTradeRoleIds, setSelectedTradeRoleIds] = useState<string[]>([]);
-  const [rateType, setRateType] = useState<string>('daily');
-  const [rateAmount, setRateAmount] = useState<string>('500');
+  const [rateType, setRateType] = useState<string>('monthly');
+  const [rateAmount, setRateAmount] = useState<string>('15000');
   const [supervisorId, setSupervisorId] = useState<string>('');
   const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([]);
 
@@ -106,8 +112,8 @@ export const OnboardingPage: React.FC = () => {
       return;
     }
 
-    if (selectedTradeRoleIds.length === 0) {
-      setFormError('At least one Trade Role must be selected.');
+    if (systemRole === 'employee' && selectedTradeRoleIds.length === 0) {
+      setFormError('At least one Trade Role must be selected for Employee (Field Worker).');
       return;
     }
 
@@ -117,8 +123,16 @@ export const OnboardingPage: React.FC = () => {
       return;
     }
 
-    if (selectedSiteIds.length === 0) {
-      setFormError('At least one Client Site must be assigned.');
+    const isSiteMandatory =
+      systemRole === 'employee' || systemRole === 'supervisor' || classification === 'contract';
+    if (isSiteMandatory && selectedSiteIds.length === 0) {
+      setFormError(
+        classification === 'contract'
+          ? 'Contract employee must be assigned to at least one site/project.'
+          : `At least one Client Site must be assigned for ${
+              systemRole === 'supervisor' ? 'Supervisor' : 'Employee (Field Worker)'
+            }.`
+      );
       return;
     }
 
@@ -128,9 +142,10 @@ export const OnboardingPage: React.FC = () => {
         name: name.trim(),
         mobile_number: formatMobileForApi(mobileNumber),
         employee_code: employeeCode.trim(),
+        classification: classification,
         system_role: systemRole,
         trade_role_ids: selectedTradeRoleIds,
-        rate_type: rateType,
+        rate_type: 'monthly',
         rate_amount: numericRate,
         supervisor_id: supervisorId || undefined,
         site_ids: selectedSiteIds,
@@ -142,10 +157,11 @@ export const OnboardingPage: React.FC = () => {
       setName('');
       setMobileNumber('');
       setEmployeeCode('');
+      setClassification('regular');
       setSystemRole('employee');
       setSelectedTradeRoleIds([]);
-      setRateType('daily');
-      setRateAmount('500');
+      setRateType('monthly');
+      setRateAmount('15000');
       setSupervisorId('');
       setSelectedSiteIds([]);
 
@@ -167,7 +183,7 @@ export const OnboardingPage: React.FC = () => {
       <div className={styles.header}>
         <div>
           <h2 className={styles.title}>Employee Onboarding</h2>
-          <p className={styles.subtitle}>Register new employees, assign system & trade roles, rates, and site assignments</p>
+          <p className={styles.subtitle}>Register new employees, assign classification, system & trade roles, monthly salary, and site/project assignments</p>
         </div>
       </div>
 
@@ -203,6 +219,16 @@ export const OnboardingPage: React.FC = () => {
               required
             />
             <Select
+              label="Employee Classification *"
+              value={classification}
+              onChange={(e) => setClassification(e.target.value as EmployeeClassification)}
+              options={[
+                { value: 'regular', label: 'Regular Employee' },
+                { value: 'contract', label: 'Contract Employee' },
+              ]}
+              required
+            />
+            <Select
               label="System Role (RBAC Security) *"
               value={systemRole}
               onChange={(e) => setSystemRole(e.target.value as SystemRole)}
@@ -218,7 +244,11 @@ export const OnboardingPage: React.FC = () => {
 
           {/* Trade Roles Multi-Select */}
           <div className={styles.sectionGroup}>
-            <label className={styles.sectionLabel}>Trade / Job Role(s) * (Select at least 1)</label>
+            <label className={styles.sectionLabel}>
+              {systemRole === 'employee'
+                ? 'Trade / Job Role(s) * (Select at least 1)'
+                : 'Trade / Job Role(s) (Optional)'}
+            </label>
             {tradeRoles.length === 0 ? (
               <p style={{ color: 'var(--color-neutral-700)', fontSize: 'var(--font-size-sm)' }}>
                 No trade roles found. Please add roles in Admin Master Data.
@@ -239,24 +269,22 @@ export const OnboardingPage: React.FC = () => {
             )}
           </div>
 
-          {/* Rate Configuration */}
+          {/* Rate Configuration - Monthly Payments Only */}
           <div className={styles.formGrid}>
             <Select
-              label="Rate Type *"
+              label="Pay Frequency / Rate Type *"
               value={rateType}
               onChange={(e) => setRateType(e.target.value)}
               options={[
-                { value: 'daily', label: 'Daily Rate' },
-                { value: 'weekly', label: 'Weekly Rate' },
-                { value: 'piece', label: 'Piece Rate' },
+                { value: 'monthly', label: 'Monthly Fixed Rate' },
               ]}
               required
             />
             <Input
-              label="Rate Amount (₹) *"
+              label="Monthly Salary / Rate Amount (₹) *"
               type="number"
               min="0"
-              placeholder="500"
+              placeholder="15000"
               value={rateAmount}
               onChange={(e) => setRateAmount(e.target.value)}
               inputMode="numeric"
@@ -279,7 +307,13 @@ export const OnboardingPage: React.FC = () => {
 
           {/* Site Assignments Multi-Select */}
           <div className={styles.sectionGroup}>
-            <label className={styles.sectionLabel}>Assigned Client Site(s) * (Select at least 1)</label>
+            <label className={styles.sectionLabel}>
+              {classification === 'contract'
+                ? 'Assigned Client Site(s) / Project * (Mandatory for Contract Employee)'
+                : systemRole === 'employee' || systemRole === 'supervisor'
+                ? 'Assigned Client Site(s) * (Select at least 1)'
+                : 'Assigned Client Site(s) (Optional)'}
+            </label>
             {sites.length === 0 ? (
               <p style={{ color: 'var(--color-neutral-700)', fontSize: 'var(--font-size-sm)' }}>
                 No construction sites found. Please add sites in Admin Master Data first.
@@ -326,6 +360,7 @@ export const OnboardingPage: React.FC = () => {
                 }}
               >
                 <div style={{ fontWeight: 'bold' }}>{emp.name} ({emp.employee_code})</div>
+                <div>Classification: <StatusBadge status={emp.classification === 'contract' ? 'inactive' : 'active'} label={emp.classification === 'contract' ? 'Contract Employee' : 'Regular Employee'} /></div>
                 <div>System Role: <StatusBadge status="active" label={emp.system_role} /></div>
                 <div>
                   Trade Roles:{' '}
@@ -334,7 +369,7 @@ export const OnboardingPage: React.FC = () => {
                 {emp.current_rate && (
                   <div>Rate: ₹{emp.current_rate.rate_amount} / {emp.current_rate.rate_type}</div>
                 )}
-                <div>Assigned Sites: {emp.active_sites.map((s) => s.name).join(', ') || 'None'}</div>
+                <div>Assigned Sites: {emp.active_sites.map((s) => s.project_name ? `${s.name} (${s.project_name})` : s.name).join(', ') || 'None'}</div>
               </div>
             ))}
           </div>

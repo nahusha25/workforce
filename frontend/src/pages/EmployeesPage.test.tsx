@@ -37,12 +37,13 @@ const mockEmployees: EmployeeResponseData[] = [
     employee_code: 'EMP-001',
     mobile_id: '+917760443750',
     name: 'John Field Worker',
+    classification: 'regular',
     system_role: 'employee',
     is_active: true,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     trade_roles: [{ id: 'tr-1', name: 'Cable Pulling' }],
-    active_sites: [{ id: 'site-1', name: 'Central Station Site' }],
+    active_sites: [{ id: 'site-1', name: 'Central Station Site', project_name: 'Metro Line 1' }],
   },
   {
     id: 'emp-2',
@@ -50,12 +51,13 @@ const mockEmployees: EmployeeResponseData[] = [
     employee_code: 'SUP-002',
     mobile_id: '+919876543210',
     name: 'Sarah Supervisor',
+    classification: 'contract',
     system_role: 'supervisor',
     is_active: true,
     created_at: '2026-01-02T00:00:00Z',
     updated_at: '2026-01-02T00:00:00Z',
     trade_roles: [],
-    active_sites: [{ id: 'site-1', name: 'Central Station Site' }],
+    active_sites: [{ id: 'site-1', name: 'Central Station Site', project_name: 'Metro Line 1' }],
   },
   {
     id: 'emp-3',
@@ -63,6 +65,7 @@ const mockEmployees: EmployeeResponseData[] = [
     employee_code: 'EMP-003',
     mobile_id: '+919123456789',
     name: 'Inactive Tech',
+    classification: 'regular',
     system_role: 'employee',
     is_active: false,
     created_at: '2026-01-03T00:00:00Z',
@@ -137,17 +140,18 @@ describe('EmployeesPage', () => {
     // Check true total count badge
     expect(screen.getByTestId('total-employees-count')).toHaveTextContent('Total: 3');
 
-    // Check column values
+    // Check active employees are visible
     expect(screen.getByText('EMP-001')).toBeInTheDocument();
     expect(screen.getByText('John Field Worker')).toBeInTheDocument();
     expect(screen.getByText('+917760443750')).toBeInTheDocument();
     expect(screen.getByText('Cable Pulling')).toBeInTheDocument();
-    expect(screen.getAllByText('Central Station Site')).toHaveLength(2);
+    expect(screen.getAllByText('Central Station Site (Metro Line 1)')).toHaveLength(2);
+    expect(screen.getByTestId('classification-badge-emp-1')).toHaveTextContent('Regular');
+    expect(screen.getByTestId('classification-badge-emp-2')).toHaveTextContent('Contract');
 
-    // Check inactive employee
-    expect(screen.getByText('EMP-003')).toBeInTheDocument();
-    expect(screen.getByText('Inactive Tech')).toBeInTheDocument();
-    expect(screen.getByText('Unassigned')).toBeInTheDocument();
+    // Inactive employee is hidden by default in the active employee directory
+    expect(screen.queryByText('EMP-003')).not.toBeInTheDocument();
+    expect(screen.queryByText('Inactive Tech')).not.toBeInTheDocument();
 
     // Admin should see Onboard button
     expect(screen.getByTestId('onboard-employee-btn')).toBeInTheDocument();
@@ -202,6 +206,9 @@ describe('EmployeesPage', () => {
       expect(screen.getByText('John Field Worker')).toBeInTheDocument();
     });
 
+    // Inactive employee is hidden by default
+    expect(screen.queryByText('Inactive Tech')).not.toBeInTheDocument();
+
     // Search by name
     const searchInput = screen.getByPlaceholderText('Search by name, code, or mobile...');
     fireEvent.change(searchInput, { target: { value: 'Sarah' } });
@@ -214,6 +221,7 @@ describe('EmployeesPage', () => {
     fireEvent.click(screen.getByText('Reset Filters'));
     expect(screen.getByText('John Field Worker')).toBeInTheDocument();
     expect(screen.getByText('Sarah Supervisor')).toBeInTheDocument();
+    expect(screen.queryByText('Inactive Tech')).not.toBeInTheDocument();
 
     // Filter by role: supervisor
     const roleSelect = screen.getByLabelText('Filter by role');
@@ -229,6 +237,35 @@ describe('EmployeesPage', () => {
 
     expect(screen.getByText('Inactive Tech')).toBeInTheDocument();
     expect(screen.queryByText('John Field Worker')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sarah Supervisor')).not.toBeInTheDocument();
+
+    // Filter by status: all
+    fireEvent.change(statusSelect, { target: { value: 'all' } });
+    expect(screen.getByText('Inactive Tech')).toBeInTheDocument();
+    expect(screen.getByText('John Field Worker')).toBeInTheDocument();
+    expect(screen.getByText('Sarah Supervisor')).toBeInTheDocument();
+  });
+
+  it('filters employees by classification (regular vs contract)', async () => {
+    vi.mocked(employeeApi.getAllEmployeesApi).mockResolvedValue(mockEmployees);
+
+    renderWithRoleGuard('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByText('John Field Worker')).toBeInTheDocument();
+      expect(screen.getByText('Sarah Supervisor')).toBeInTheDocument();
+    });
+
+    const classificationSelect = screen.getByLabelText('Filter by classification');
+
+    // Filter by contract
+    fireEvent.change(classificationSelect, { target: { value: 'contract' } });
+    expect(screen.queryByText('John Field Worker')).not.toBeInTheDocument();
+    expect(screen.getByText('Sarah Supervisor')).toBeInTheDocument();
+
+    // Filter by regular
+    fireEvent.change(classificationSelect, { target: { value: 'regular' } });
+    expect(screen.getByText('John Field Worker')).toBeInTheDocument();
     expect(screen.queryByText('Sarah Supervisor')).not.toBeInTheDocument();
   });
 
@@ -383,5 +420,88 @@ describe('EmployeesPage', () => {
       expect(screen.getByTestId('success-banner')).toHaveTextContent(/was updated successfully/);
     });
   });
+
+  it('displays deactivation message when employee with historical records is deleted', async () => {
+    vi.mocked(employeeApi.getAllEmployeesApi).mockResolvedValue(mockEmployees);
+    vi.mocked(employeeApi.deleteEmployeeApi).mockResolvedValue({
+      status: 'success',
+      message: 'Employee John Field Worker (EMP-001) has historical records and was deactivated successfully.',
+    });
+
+    renderWithRoleGuard('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByText('John Field Worker')).toBeInTheDocument();
+    });
+
+    const deleteBtn = screen.getByTestId('delete-emp-emp-1');
+    fireEvent.click(deleteBtn);
+
+    const confirmBtn = screen.getByTestId('confirm-delete-btn');
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(employeeApi.deleteEmployeeApi).toHaveBeenCalledWith('emp-1');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('success-banner')).toHaveTextContent(
+        /has historical records and was deactivated successfully/i
+      );
+    });
+  });
+
+  it('displays deletion error banner when delete API fails', async () => {
+    vi.mocked(employeeApi.getAllEmployeesApi).mockResolvedValue(mockEmployees);
+    vi.mocked(employeeApi.deleteEmployeeApi).mockRejectedValue({
+      response: { data: { detail: 'Cannot delete your own administrator account' } },
+    });
+
+    renderWithRoleGuard('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByText('John Field Worker')).toBeInTheDocument();
+    });
+
+    const deleteBtn = screen.getByTestId('delete-emp-emp-1');
+    fireEvent.click(deleteBtn);
+
+    const confirmBtn = screen.getByTestId('confirm-delete-btn');
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Cannot delete your own administrator account')).toBeInTheDocument();
+    });
+  });
+
+  it('hides deactivated employees by default and shows them when status filter is set to inactive or all', async () => {
+    vi.mocked(employeeApi.getAllEmployeesApi).mockResolvedValue(mockEmployees);
+
+    renderWithRoleGuard('administrator');
+
+    await waitFor(() => {
+      expect(screen.getByText('John Field Worker')).toBeInTheDocument();
+    });
+
+    // Verify Active view by default: active workers present, inactive worker absent
+    expect(screen.getByText('John Field Worker')).toBeInTheDocument();
+    expect(screen.getByText('Sarah Supervisor')).toBeInTheDocument();
+    expect(screen.queryByText('Inactive Tech')).not.toBeInTheDocument();
+
+    // Change status filter to Inactive
+    const statusSelect = screen.getByLabelText('Filter by status');
+    fireEvent.change(statusSelect, { target: { value: 'inactive' } });
+
+    expect(screen.getByText('Inactive Tech')).toBeInTheDocument();
+    expect(screen.queryByText('John Field Worker')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sarah Supervisor')).not.toBeInTheDocument();
+
+    // Change status filter to All
+    fireEvent.change(statusSelect, { target: { value: 'all' } });
+    expect(screen.getByText('Inactive Tech')).toBeInTheDocument();
+    expect(screen.getByText('John Field Worker')).toBeInTheDocument();
+    expect(screen.getByText('Sarah Supervisor')).toBeInTheDocument();
+  });
 });
+
 

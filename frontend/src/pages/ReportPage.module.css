@@ -112,3 +112,27 @@
   border-radius: 6px;
   background: #ffffff;
 }
+
+.scopeNotice {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.25rem;
+  font-size: 0.8125rem;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  line-height: 1.45;
+}
+
+.noticeIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9375rem;
+  color: #0284c7;
+  flex-shrink: 0;
+}

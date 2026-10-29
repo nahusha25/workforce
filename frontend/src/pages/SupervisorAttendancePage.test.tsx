@@ -74,6 +74,8 @@ describe('SupervisorAttendancePage', () => {
       expect(screen.getByText('Bob Builder')).toBeInTheDocument();
       // rec-3 has null employee_name, falls back to employee_id
       expect(screen.getByText('emp-uuid-3333')).toBeInTheDocument();
+      // rec-1 working_hours: 9.0 formatted as "9 hrs"
+      expect(screen.getByText('9 hrs')).toBeInTheDocument();
     });
   });
 
@@ -202,5 +204,140 @@ describe('SupervisorAttendancePage', () => {
     // Modal closed
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(overrideAttendance).not.toHaveBeenCalled();
+  });
+
+  it('displays actual distance and coordinates for flagged records in the table', async () => {
+    const customRecords: AttendanceRecord[] = [
+      {
+        id: 'rec-flagged-gps',
+        employee_id: 'emp-uuid-5555',
+        employee_name: 'Charlie Field',
+        site_id: 'site-uuid-1',
+        site_name: 'Metro Station Site',
+        date: today,
+        check_in_time: `${today}T08:15:00Z`,
+        check_out_time: null,
+        status: 'flagged',
+        working_hours: null,
+        is_within_geofence: false,
+        check_in_latitude: 12.98000,
+        check_in_longitude: 77.52000,
+        check_in_distance_m: 1250,
+      },
+    ];
+    (getAttendanceRecords as any).mockResolvedValue(customRecords);
+
+    render(<SupervisorAttendancePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Charlie Field')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Outside')).toBeInTheDocument();
+    expect(screen.getByText('1.25 km (1,250 m) from site')).toBeInTheDocument();
+    expect(screen.getByText('12.9800°, 77.5200°')).toBeInTheDocument();
+  });
+
+  it('prominently displays reported location, distance, and safe OpenStreetMap link in override modal', async () => {
+    const customRecords: AttendanceRecord[] = [
+      {
+        id: 'rec-flagged-osm',
+        employee_id: 'emp-uuid-5555',
+        employee_name: 'Charlie Field',
+        site_id: 'site-uuid-1',
+        site_name: 'Metro Station Site',
+        site_latitude: 12.96630,
+        site_longitude: 77.50960,
+        site_permitted_radius_m: 100,
+        date: today,
+        check_in_time: `${today}T08:15:00Z`,
+        check_out_time: null,
+        status: 'flagged',
+        working_hours: null,
+        is_within_geofence: false,
+        check_in_latitude: 12.98000,
+        check_in_longitude: 77.52000,
+        check_in_distance_m: 1250,
+      },
+    ];
+    (getAttendanceRecords as any).mockResolvedValue(customRecords);
+
+    render(<SupervisorAttendancePage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /override/i })).toBeInTheDocument();
+    });
+
+    // Open Override Modal
+    fireEvent.click(screen.getByRole('button', { name: /override/i }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+
+    // Verify Reported Check-In Location card
+    expect(within(dialog).getByText('Reported Check-In Location')).toBeInTheDocument();
+    expect(within(dialog).getByText(/12.980000° N, 77.520000° E/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/1.25 km \(1,250 m\) from site/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/1,150m outside permitted 100m radius/)).toBeInTheDocument();
+
+    // Verify OpenStreetMap link
+    const osmLink = within(dialog).getByRole('link', { name: /View on OpenStreetMap/i });
+    expect(osmLink).toBeInTheDocument();
+    expect(osmLink).toHaveAttribute('href', 'https://www.openstreetmap.org/?mlat=12.98&mlon=77.52#map=17/12.98/77.52');
+    expect(osmLink).toHaveAttribute('target', '_blank');
+    expect(osmLink).toHaveAttribute('rel', 'noopener noreferrer');
+
+    // Verify Registered Site Location card
+    expect(within(dialog).getByText('Registered Site Location')).toBeInTheDocument();
+    expect(within(dialog).getByText(/12.966300° N, 77.509600° E/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Permitted Radius:/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/100 m/)).toBeInTheDocument();
+  });
+
+  it('handles missing coordinates gracefully with fallback text in table and modal', async () => {
+    const customRecords: AttendanceRecord[] = [
+      {
+        id: 'rec-missing-coords',
+        employee_id: 'emp-uuid-6666',
+        employee_name: 'No GPS Worker',
+        site_id: 'site-uuid-2',
+        site_name: 'Remote Substation',
+        site_latitude: null,
+        site_longitude: null,
+        site_permitted_radius_m: null,
+        date: today,
+        check_in_time: `${today}T08:30:00Z`,
+        check_out_time: null,
+        status: 'flagged',
+        working_hours: null,
+        is_within_geofence: false,
+        check_in_latitude: null,
+        check_in_longitude: null,
+        check_in_distance_m: null,
+      },
+    ];
+    (getAttendanceRecords as any).mockResolvedValue(customRecords);
+
+    render(<SupervisorAttendancePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No GPS Worker')).toBeInTheDocument();
+    });
+
+    // In Table: should display fallback "No GPS coords"
+    expect(screen.getByText('No GPS coords')).toBeInTheDocument();
+
+    // Open Override Modal
+    fireEvent.click(screen.getByRole('button', { name: /override/i }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+
+    // Fallback notice displayed in modal
+    expect(within(dialog).getByText('Actual check-in coordinates are unavailable for this record.')).toBeInTheDocument();
+    expect(within(dialog).getByText('Site coordinates are not configured for this location.')).toBeInTheDocument();
+
+    // No OpenStreetMap link rendered when coordinates are missing
+    expect(within(dialog).queryByRole('link', { name: /View on OpenStreetMap/i })).not.toBeInTheDocument();
   });
 });

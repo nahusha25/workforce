@@ -259,6 +259,8 @@ class AttendanceService:
                 AttendanceRecord,
                 Employee.name.label("employee_name"),
                 Site.name.label("site_name"),
+                Site.location.label("site_location"),
+                Site.permitted_radius_m.label("site_permitted_radius_m"),
             )
             .outerjoin(Employee, AttendanceRecord.employee_id == Employee.id)
             .outerjoin(Site, AttendanceRecord.site_id == Site.id)
@@ -281,7 +283,14 @@ class AttendanceService:
                             Site.supervisor_id == supervisor_emp_id
                         )
                     )
-                    .group_by(AttendanceRecord.id, Employee.name, Site.name)
+                    .group_by(
+                        AttendanceRecord.id,
+                        Employee.name,
+                        Site.id,
+                        Site.name,
+                        Site.location,
+                        Site.permitted_radius_m,
+                    )
                 )
         elif employee_id:
             stmt = stmt.where(AttendanceRecord.employee_id == employee_id)
@@ -298,6 +307,8 @@ class AttendanceService:
             rec = row[0]
             rec.employee_name = row[1]
             rec.site_name = row[2]
+            rec.site_location = row[3]
+            rec.site_permitted_radius_m = row[4]
             items.append(rec)
         
         return items, total

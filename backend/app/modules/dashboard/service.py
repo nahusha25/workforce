@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy import and_, case, func, literal, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.employee_payments import EmployeePaymentLine
 from app.models.operations import (
     Activity,
     AttendanceRecord,
@@ -135,16 +136,24 @@ def _mt_base_filter(f: DashboardFilters):
 
 
 def _mt_filter_with_status(f: DashboardFilters, status: Optional[str] = None):
-    """Core filter for material_transactions with optional status restriction."""
-    from datetime import timedelta
-    from sqlalchemy import cast as sa_cast
-    from sqlalchemy.types import Date as DateType
-    date_to_exclusive = f.date_to + timedelta(days=1)
-    # Cast timestamptz created_at to Date for clean date-boundary comparison.
-    created_date = sa_cast(MaterialTransaction.created_at, DateType)
+    """Core filter for material_transactions with optional status restriction.
+
+    Material transactions are filtered by parent DailyWorkEntry.work_date,
+    matching invoicing business logic (never MaterialTransaction.created_at).
+    """
+    from sqlalchemy.orm import aliased
+    dwe = aliased(DailyWorkEntry)
+    dwe_clauses = [
+        dwe.work_date >= f.date_from,
+        dwe.work_date <= f.date_to,
+    ]
+    if f.employee_id:
+        dwe_clauses.append(dwe.employee_id == f.employee_id)
+
     clauses = [
-        created_date >= f.date_from,
-        created_date < date_to_exclusive,
+        MaterialTransaction.daily_work_entry_id.in_(
+            select(dwe.id).where(and_(*dwe_clauses))
+        )
     ]
     if status is not None:
         clauses.append(MaterialTransaction.status == status)
@@ -618,45 +627,13 @@ class DashboardService:
         status: Optional[str] = None,
     ) -> MaterialsReportResponse:
         # For the materials report we want all statuses by default; filter if requested
-        base = [
-            MaterialTransaction.created_at >= func.cast(f.date_from, MaterialTransaction.created_at.type),
-            MaterialTransaction.created_at < text(f"'{f.date_to}'::date + interval '1 day'"),
-        ]
-        if status:
-            base.append(MaterialTransaction.status == status)
-        if f.site_id:
-            base.append(MaterialTransaction.site_id == f.site_id)
-        if f.supervisor_id:
-            base.append(
-                MaterialTransaction.site_id.in_(
-                    select(Site.id).where(Site.supervisor_id == f.supervisor_id)
-                )
-            )
-        if f.client_id:
-            base.append(
-                MaterialTransaction.site_id.in_(
-                    select(Site.id)
-                    .join(Project, Project.id == Site.project_id)
-                    .where(Project.client_id == f.client_id)
-                )
-            )
+        base = list(_mt_filter_with_status(f, status=status))
         if transaction_type:
             base.append(MaterialTransaction.transaction_type == transaction_type)
         if is_high_value is not None:
             base.append(MaterialTransaction.is_high_value == is_high_value)
-        # Optionally include only approved for cost-related views; caller passes status via filters
-        # Default: all statuses (report shows history)
 
-        # employee_id filter: via the linked daily_work_entry
-        if f.employee_id:
-            from app.models.operations import DailyWorkEntry as DWE
-            base.append(
-                MaterialTransaction.daily_work_entry_id.in_(
-                    select(DWE.id).where(DWE.employee_id == f.employee_id)
-                )
-            )
-
-        count_stmt = select(func.count()).where(and_(*base))
+        count_stmt = select(func.count(MaterialTransaction.id)).where(and_(*base))
         total = (await session.execute(count_stmt)).scalar() or 0
 
         stmt = (
@@ -740,6 +717,7 @@ class DashboardService:
         f: DashboardFilters,
         page: int = 1,
         page_size: int = 50,
+        scope: str = "all",
     ) -> PaymentSummaryResponse:
         """
         Estimated pay preview using per-record effective-dated rates.
@@ -777,6 +755,15 @@ class DashboardService:
             att_base.append(
                 AttendanceRecord.site_id.in_(
                     select(Site.id).where(Site.supervisor_id == f.supervisor_id)
+                )
+            )
+        if scope == "unbilled_only":
+            att_base.append(
+                ~AttendanceRecord.id.in_(
+                    select(EmployeePaymentLine.source_attendance_id).where(
+                        EmployeePaymentLine.is_active.is_(True),
+                        EmployeePaymentLine.source_attendance_id.isnot(None),
+                    )
                 )
             )
 
@@ -840,6 +827,15 @@ class DashboardService:
             dwe_base.append(
                 DailyWorkEntry.site_id.in_(
                     select(Site.id).where(Site.supervisor_id == f.supervisor_id)
+                )
+            )
+        if scope == "unbilled_only":
+            dwe_base.append(
+                ~DailyWorkEntry.id.in_(
+                    select(EmployeePaymentLine.source_daily_work_entry_id).where(
+                        EmployeePaymentLine.is_active.is_(True),
+                        EmployeePaymentLine.source_daily_work_entry_id.isnot(None),
+                    )
                 )
             )
 
@@ -972,6 +968,7 @@ class DashboardService:
             total=total,
             page=page,
             page_size=page_size,
+            scope=scope,
         )
 
     # ------------------------------------------------------------------

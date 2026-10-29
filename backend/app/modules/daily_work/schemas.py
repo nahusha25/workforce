@@ -2,21 +2,40 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+class WorkMeasurementItem(BaseModel):
+    start_point: str = Field(..., min_length=1, max_length=100, description="Start point identifier (e.g., P1)")
+    end_point: str = Field(..., min_length=1, max_length=100, description="End point identifier (e.g., P2)")
+    distance: Decimal = Field(..., gt=0, description="Distance in metres, must be positive")
+
+    @field_validator("start_point", "end_point")
+    @classmethod
+    def validate_point_not_empty(cls, v: str) -> str:
+        s = v.strip() if isinstance(v, str) else ""
+        if not s:
+            raise ValueError("Point name cannot be blank")
+        return s
 
 class DailyWorkEntryCreate(BaseModel):
     idempotency_key: str = Field(..., min_length=1, max_length=100, description="Client-generated unique key to prevent duplicate submissions")
     activity_id: uuid.UUID
     work_order_id: Optional[uuid.UUID] = None
-    quantity: Decimal = Field(..., ge=0)
+    quantity: Optional[Decimal] = Field(default=None, ge=0)
+    measurements: Optional[List[WorkMeasurementItem]] = None
     work_date: Optional[date] = None
     remarks: Optional[str] = None
+    material_id: Optional[uuid.UUID] = None
+    material_quantity: Optional[Decimal] = None
 
 class DailyWorkEntryUpdate(BaseModel):
     activity_id: Optional[uuid.UUID] = None
     work_order_id: Optional[uuid.UUID] = None
     quantity: Optional[Decimal] = Field(default=None, ge=0)
+    measurements: Optional[List[WorkMeasurementItem]] = None
     remarks: Optional[str] = None
+    material_id: Optional[uuid.UUID] = None
+    material_quantity: Optional[Decimal] = None
 
 class WorkPhotoResponse(BaseModel):
     id: uuid.UUID
@@ -24,6 +43,7 @@ class WorkPhotoResponse(BaseModel):
     image_url: str
     thumbnail_url: Optional[str] = None
     file_size_bytes: Optional[int] = None
+    photo_type: Optional[str] = None
     uploaded_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -61,6 +81,7 @@ class DailyWorkEntryResponse(BaseModel):
     uom: str
     status: str
     remarks: Optional[str] = None
+    measurements: Optional[List[WorkMeasurementItem]] = Field(default_factory=list)
     photos: List[WorkPhotoResponse] = Field(default_factory=list)
     materials: List[MaterialTransactionResponse] = Field(default_factory=list)
     created_at: datetime

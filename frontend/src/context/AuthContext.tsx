@@ -31,10 +31,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const profile = await getProfileApi();
       setUser(profile);
-    } catch {
+      return profile;
+    } catch (err: any) {
       setUser(null);
       setAccessToken(null);
       setAccessTokenState(null);
+      throw err;
     }
   };
 
@@ -43,7 +45,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const token = getAccessToken();
       if (token) {
         setAccessTokenState(token);
-        await fetchProfile();
+        try {
+          await fetchProfile();
+        } catch {
+          // Stale session or inactive user
+        }
       } else {
         // Try refresh token from httpOnly cookie
         try {
@@ -51,7 +57,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (res.access_token) {
             setAccessToken(res.access_token);
             setAccessTokenState(res.access_token);
-            await fetchProfile();
+            try {
+              await fetchProfile();
+            } catch {
+              // Stale session or inactive user
+            }
           }
         } catch {
           // No active session

@@ -5,7 +5,7 @@ import { getSitesApi, type SiteResponseData } from '../api/masterData';
 import { ExceptionBadge } from '../components/ui/ExceptionBadge';
 import { StatusBadge, mapAttendanceStatusToBadge } from '../components/ui/StatusBadge';
 import { formatDecimal } from '../components/MaterialTransactionEntry';
-import { getLocalISODate, isValidISODate } from '../utils/date';
+import { getLocalISODate, isValidISODate, formatWorkingHours } from '../utils/date';
 import {
   Calendar,
   Building2,
@@ -349,7 +349,7 @@ export const SupervisorVerificationQueuePage: React.FC = () => {
                 <div className={styles.metricItem}>
                   <span className={styles.metricLabel}>Hours</span>
                   <span className={styles.metricValue}>
-                    {item.working_hours != null ? `${item.working_hours}h` : '—'}
+                    {formatWorkingHours(item.working_hours)}
                   </span>
                 </div>
 

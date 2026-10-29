@@ -130,7 +130,7 @@ describe('DirectorDashboardPage', () => {
       // 1. Manpower
       expect(screen.getByText('42')).toBeTruthy();
       // 2. Working hours
-      expect(screen.getByText('1250.5h')).toBeTruthy();
+      expect(screen.getByText('1250 hrs 30 min')).toBeTruthy();
       // 3. Cable installed
       expect(screen.getByText('1450.3 m')).toBeTruthy();
       // 4. Devices installed

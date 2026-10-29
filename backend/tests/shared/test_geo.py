@@ -96,3 +96,68 @@ def test_is_within_geofence_invalid_radius():
         
     with pytest.raises(ValueError, match="Radius must be a number."):
         is_within_geofence(12.0, 77.0, 12.0, 77.0, "100")
+
+
+def test_parse_location_none_and_empty():
+    from app.shared.geo import parse_location_to_lat_lng
+    assert parse_location_to_lat_lng(None) == (None, None)
+    assert parse_location_to_lat_lng("") == (None, None)
+    assert parse_location_to_lat_lng("INVALID") == (None, None)
+
+
+def test_parse_location_wkt_valid():
+    from app.shared.geo import parse_location_to_lat_lng
+    lat, lng = parse_location_to_lat_lng("POINT(77.509561 12.966294)")
+    assert lat == 12.966294
+    assert lng == 77.509561
+
+
+def test_parse_location_wkt_zero_and_invalid():
+    from app.shared.geo import parse_location_to_lat_lng
+    # Never substitute or accept (0, 0)
+    assert parse_location_to_lat_lng("POINT(0 0)") == (None, None)
+    assert parse_location_to_lat_lng("POINT(0.000000 0.000000)") == (None, None)
+    # Out of range
+    assert parse_location_to_lat_lng("POINT(200 95)") == (None, None)
+
+
+def test_parse_location_wkb_bytes_and_element():
+    import struct
+    from app.shared.geo import parse_location_to_lat_lng
+
+    # Construct EWKB: byteorder(1), geom_type with SRID (0x20000001), srid (4326), x=lng (77.509561), y=lat (12.966294)
+    raw_ewkb = (
+        b"\x01"
+        + struct.pack("<I", 0x20000001)
+        + struct.pack("<I", 4326)
+        + struct.pack("<dd", 77.509561, 12.966294)
+    )
+
+    # 1. Raw bytes
+    lat, lng = parse_location_to_lat_lng(raw_ewkb)
+    assert lat == 12.966294
+    assert lng == 77.509561
+
+    # 2. WKBElement mock object
+    class MockWKB:
+        def __init__(self, data):
+            self.data = data
+
+    lat_mock, lng_mock = parse_location_to_lat_lng(MockWKB(raw_ewkb))
+    assert lat_mock == 12.966294
+    assert lng_mock == 77.509561
+
+    # 3. Hex string
+    lat_hex, lng_hex = parse_location_to_lat_lng(raw_ewkb.hex())
+    assert lat_hex == 12.966294
+    assert lng_hex == 77.509561
+
+    # 4. Zero coordinates in WKB must return (None, None)
+    zero_ewkb = (
+        b"\x01"
+        + struct.pack("<I", 0x20000001)
+        + struct.pack("<I", 4326)
+        + struct.pack("<dd", 0.0, 0.0)
+    )
+    assert parse_location_to_lat_lng(zero_ewkb) == (None, None)
+

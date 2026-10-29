@@ -16,6 +16,7 @@ import {
   type DashboardFilters,
 } from '../api/dashboard';
 import { formatDecimal } from '../components/MaterialTransactionEntry';
+import { formatWorkingHours } from '../utils/workingHours';
 import { MetricCard } from '../components/dashboard/MetricCard';
 import { FilterBar, getDefaultFilterDates } from '../components/dashboard/FilterBar';
 import { DashboardCharts } from '../components/dashboard/DashboardCharts';
@@ -101,10 +102,10 @@ export const DirectorDashboardPage: React.FC = () => {
         {/* 2. Total Working Hours */}
         <MetricCard
           title="Approved Hours"
-          value={data ? `${Number(data.working_hours.total_hours).toFixed(1)}h` : null}
+          value={data ? formatWorkingHours(data.working_hours.total_hours) : null}
           subtitle={
             data?.working_hours.average_per_employee !== null && data?.working_hours.average_per_employee !== undefined
-              ? `Avg ${Number(data.working_hours.average_per_employee).toFixed(1)}h / employee`
+              ? `Avg ${formatWorkingHours(data.working_hours.average_per_employee)} / employee`
               : 'Verified hours'
           }
           icon={<Clock size={20} />}

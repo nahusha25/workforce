@@ -11,6 +11,7 @@ from app.models.auth import User
 from app.models.workforce import Employee
 from app.modules.attendance.schemas import CheckInRequest, CheckOutRequest, OverrideRequest
 from app.modules.attendance.service import AttendanceService
+from app.shared.geo import parse_location_to_lat_lng
 
 router = APIRouter()
 
@@ -37,6 +38,9 @@ async def check_in(
     db: AsyncSession = Depends(get_db)
 ):
     record = await AttendanceService.check_in(db, employee.id, current_user.id, data)
+    in_lat, in_lng = parse_location_to_lat_lng(record.check_in_location)
+    check_in_dist = round(float(record.check_in_distance_m), 2) if record.check_in_distance_m is not None else None
+
     res = {
         "status": "success",
         "record_id": record.id,
@@ -46,6 +50,9 @@ async def check_in(
             "site_id": record.site_id,
             "date": record.date,
             "check_in_time": record.check_in_time,
+            "check_in_latitude": in_lat if in_lat is not None else data.latitude,
+            "check_in_longitude": in_lng if in_lng is not None else data.longitude,
+            "check_in_distance_m": check_in_dist,
             "status": record.status,
             "is_within_geofence": record.is_within_geofence,
         }
@@ -100,15 +107,32 @@ async def list_attendance(
     
     result_list = []
     for item in items:
+        in_lat, in_lng = parse_location_to_lat_lng(item.check_in_location)
+        out_lat, out_lng = parse_location_to_lat_lng(item.check_out_location)
+        site_lat, site_lng = parse_location_to_lat_lng(getattr(item, "site_location", None))
+
+        check_in_dist = round(float(item.check_in_distance_m), 2) if item.check_in_distance_m is not None else None
+        check_out_dist = round(float(item.check_out_distance_m), 2) if item.check_out_distance_m is not None else None
+        site_radius = float(item.site_permitted_radius_m) if getattr(item, "site_permitted_radius_m", None) is not None else None
+
         result_list.append({
             "id": item.id,
             "employee_id": item.employee_id,
             "employee_name": getattr(item, "employee_name", None),
             "site_id": item.site_id,
             "site_name": getattr(item, "site_name", None),
+            "site_latitude": site_lat,
+            "site_longitude": site_lng,
+            "site_permitted_radius_m": site_radius,
             "date": item.date,
             "check_in_time": item.check_in_time,
+            "check_in_latitude": in_lat,
+            "check_in_longitude": in_lng,
+            "check_in_distance_m": check_in_dist,
             "check_out_time": item.check_out_time,
+            "check_out_latitude": out_lat,
+            "check_out_longitude": out_lng,
+            "check_out_distance_m": check_out_dist,
             "status": item.status,
             "working_hours": item.working_hours,
             "is_within_geofence": item.is_within_geofence
@@ -127,13 +151,26 @@ async def get_attendance(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    from app.models.operations import AttendanceRecord
-    stmt = select(AttendanceRecord).where(AttendanceRecord.id == id)
+    from app.models.operations import AttendanceRecord, Site
+    stmt = (
+        select(
+            AttendanceRecord,
+            Employee.name.label("employee_name"),
+            Site.name.label("site_name"),
+            Site.location.label("site_location"),
+            Site.permitted_radius_m.label("site_permitted_radius_m"),
+        )
+        .outerjoin(Employee, AttendanceRecord.employee_id == Employee.id)
+        .outerjoin(Site, AttendanceRecord.site_id == Site.id)
+        .where(AttendanceRecord.id == id)
+    )
     result = await db.execute(stmt)
-    record = result.scalars().first()
+    row = result.first()
     
-    if not record:
+    if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attendance record not found")
+
+    record, employee_name, site_name, site_location, site_permitted_radius_m = row
 
     emp = await get_optional_employee(current_user, db)
 
@@ -147,13 +184,32 @@ async def get_attendance(
         if not is_auth:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access other employee records")
 
+    in_lat, in_lng = parse_location_to_lat_lng(record.check_in_location)
+    out_lat, out_lng = parse_location_to_lat_lng(record.check_out_location)
+    site_lat, site_lng = parse_location_to_lat_lng(site_location)
+
+    check_in_dist = round(float(record.check_in_distance_m), 2) if record.check_in_distance_m is not None else None
+    check_out_dist = round(float(record.check_out_distance_m), 2) if record.check_out_distance_m is not None else None
+    site_radius = float(site_permitted_radius_m) if site_permitted_radius_m is not None else None
+
     return {
         "id": record.id,
         "employee_id": record.employee_id,
+        "employee_name": employee_name,
         "site_id": record.site_id,
+        "site_name": site_name,
+        "site_latitude": site_lat,
+        "site_longitude": site_lng,
+        "site_permitted_radius_m": site_radius,
         "date": record.date,
         "check_in_time": record.check_in_time,
+        "check_in_latitude": in_lat,
+        "check_in_longitude": in_lng,
+        "check_in_distance_m": check_in_dist,
         "check_out_time": record.check_out_time,
+        "check_out_latitude": out_lat,
+        "check_out_longitude": out_lng,
+        "check_out_distance_m": check_out_dist,
         "status": record.status,
         "working_hours": record.working_hours,
         "is_within_geofence": record.is_within_geofence

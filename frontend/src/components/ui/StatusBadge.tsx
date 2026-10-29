@@ -11,7 +11,13 @@ export type StatusType =
   | 'correction_required'
   | 'active'
   | 'inactive'
-  | 'flagged';
+  | 'flagged'
+  | 'issued'
+  | 'partially_paid'
+  | 'paid'
+  | 'cancelled'
+  | 'recorded'
+  | 'voided';
 
 export type AttendanceStatus =
   | 'draft'

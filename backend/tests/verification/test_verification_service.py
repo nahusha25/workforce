@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.auth import User
+from app.models.material_inventory import MaterialStock
 from app.models.operations import (
     Activity,
     AttendanceRecord,
@@ -201,7 +202,12 @@ async def setup_test_environment(session: AsyncSession):
         bill_image_url="/uploads/bills/drill_receipt.jpg",
         status="submitted",
     )
-    session.add_all([mat_consumed, mat_purchased])
+    stock = MaterialStock(
+        site_id=site.id,
+        material_id=material.id,
+        quantity=Decimal("100.00"),
+    )
+    session.add_all([mat_consumed, mat_purchased, stock])
     await session.commit()
 
     return {

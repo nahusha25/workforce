@@ -205,7 +205,7 @@ describe('EmployeeDayVerificationPage', () => {
 
   // 1. Loading state
   it('renders loading indicator while fetching employee day detail', () => {
-    (getEmployeeDayDetail as any).mockImplementation(() => new Promise(() => {}));
+    (getEmployeeDayDetail as any).mockImplementation(() => new Promise(() => { }));
     renderWithRouter();
     expect(screen.getByTestId('detail-loading')).toBeTruthy();
     expect(screen.getByText(/Loading verification details…/i)).toBeTruthy();
@@ -359,6 +359,39 @@ describe('EmployeeDayVerificationPage', () => {
     expect(screen.getByTestId('high-value-badge')).toBeTruthy();
     expect(screen.getByText('High Value')).toBeTruthy();
     expect(screen.getByTestId('material-amount').textContent).toContain('₹1250.75');
+  });
+
+  // 9b. Working hours and Overtime readable formatting
+  it('displays readable working hours and overtime (e.g. 8 hrs 30 min and 30 min) instead of decimal values', async () => {
+    renderWithRouter();
+
+    await waitFor(() => {
+      expect(screen.getByText('Hours Worked')).toBeTruthy();
+    });
+
+    // mockEmployeeDay has working_hours: 8.5 -> "8 hrs 30 min"
+    expect(screen.getByText('8 hrs 30 min')).toBeTruthy();
+    // mockEmployeeDay has overtime_hours: 0.5 -> "30 min"
+    expect(screen.getByText('30 min')).toBeTruthy();
+  });
+
+  it('formats noisy floating point working hours such as 0.49683332583333334h cleanly as 30 min', async () => {
+    (getEmployeeDayDetail as any).mockResolvedValueOnce({
+      ...mockDetail,
+      attendance: {
+        ...mockDetail.attendance,
+        working_hours: 0.49683332583333334,
+        overtime_hours: null,
+      },
+    });
+
+    renderWithRouter();
+
+    await waitFor(() => {
+      expect(screen.getByText('Hours Worked')).toBeTruthy();
+    });
+
+    expect(screen.getByText('30 min')).toBeTruthy();
   });
 
   // 10. Three-event history renders in chronological order
@@ -851,9 +884,8 @@ describe('EmployeeDayVerificationPage', () => {
       expect(screen.queryByTestId('approve-confirm-modal')).toBeNull();
       expect(screen.getByTestId('success-notice')).toBeTruthy();
       expect(screen.getByTestId('success-notice').textContent).toContain('approved successfully');
+      expect(getEmployeeDayDetail).toHaveBeenCalledTimes(2);
     });
-
-    expect(getEmployeeDayDetail).toHaveBeenCalledTimes(2);
   });
 
   // 26. State conflict response (409 and specific 400) reloads with message
@@ -887,9 +919,8 @@ describe('EmployeeDayVerificationPage', () => {
       expect(screen.queryByTestId('approve-confirm-modal')).toBeNull();
       expect(screen.getByTestId('conflict-notice')).toBeTruthy();
       expect(screen.getByTestId('conflict-notice').textContent).toContain('This record changed; refreshed');
+      expect(getEmployeeDayDetail).toHaveBeenCalledTimes(2);
     });
-
-    expect(getEmployeeDayDetail).toHaveBeenCalledTimes(2);
 
     // Also verify specific 400 InvalidVerificationStateError detail triggers conflict reload
     const conflictErr400: any = new Error('Bad request');
@@ -906,9 +937,8 @@ describe('EmployeeDayVerificationPage', () => {
       expect(screen.queryByTestId('approve-confirm-modal')).toBeNull();
       expect(screen.getByTestId('conflict-notice')).toBeTruthy();
       expect(screen.getByTestId('conflict-notice').textContent).toContain('This record changed; refreshed');
+      expect(getEmployeeDayDetail).toHaveBeenCalledTimes(3);
     });
-
-    expect(getEmployeeDayDetail).toHaveBeenCalledTimes(3);
   });
 
   // 27. High-value approval requires confirm
@@ -1599,6 +1629,99 @@ describe('EmployeeDayVerificationPage', () => {
     // After refresh completes, remaining action buttons are re-enabled
     expect(screen.getByTestId('approve-attendance-btn')).not.toBeDisabled();
   });
+
+  // 25. Work Photo Evidence & Supervisor Direct Approval
+  it('displays start-point and end-point photos and reported quantity for supervisor review and approves directly without requiring separate measurement input', async () => {
+    const cableLayingEntry = {
+      ...mockDetail.work_entries[0],
+      id: 'dwe-cable-1',
+      activity_name: 'Underground Cable Laying',
+      activity_category: 'Electrical & Cabling',
+      quantity: '120.00',
+      uom: 'metres',
+      status: 'submitted',
+      photos: [
+        {
+          id: 'photo-start-1',
+          daily_work_entry_id: 'dwe-cable-1',
+          image_url: 'http://example.com/cable_start.jpg',
+          thumbnail_url: 'http://example.com/cable_start_thumb.jpg',
+          photo_type: 'start_point',
+          file_size_bytes: 150000,
+          uploaded_at: '2026-09-28T09:00:00Z',
+        },
+        {
+          id: 'photo-end-1',
+          daily_work_entry_id: 'dwe-cable-1',
+          image_url: 'http://example.com/cable_end.jpg',
+          thumbnail_url: 'http://example.com/cable_end_thumb.jpg',
+          photo_type: 'end_point',
+          file_size_bytes: 160000,
+          uploaded_at: '2026-09-28T16:00:00Z',
+        },
+      ],
+      materials: [
+        {
+          id: 'mat-cable-1',
+          daily_work_entry_id: 'dwe-cable-1',
+          material_id: 'mat-armoured-cable',
+          site_id: 'site-1',
+          transaction_type: 'consumed',
+          item_name: '4-Core Armoured Cable',
+          quantity: '120.00',
+          amount: '0.00',
+          status: 'submitted',
+          verification_record_id: null,
+          verification_action: null,
+          verification_remarks: null,
+          history: [],
+        },
+      ],
+    };
+
+    (getEmployeeDayDetail as any).mockResolvedValueOnce({
+      ...mockDetail,
+      work_entries: [cableLayingEntry],
+    });
+
+    renderWithRouter('supervisor');
+
+    await waitFor(() => {
+      expect(screen.getByText('Underground Cable Laying')).toBeTruthy();
+    });
+
+    // 1. Verify reported quantity and unit (120 metres) is displayed clearly
+    expect(screen.getByTestId('entry-quantity').textContent).toBe('120.00 metres');
+
+    // 2. Verify start-point and end-point photos are rendered with their badges
+    expect(screen.getByTestId('start-point-photo')).toBeTruthy();
+    expect(screen.getByTestId('start_point-badge').textContent).toBe('Start Point');
+    expect(screen.getByTestId('end-point-photo')).toBeTruthy();
+    expect(screen.getByTestId('end_point-badge').textContent).toBe('End Point');
+
+    // 3. Supervisor approves work entry directly without being prompted for quantity/measurement
+    const approveBtn = screen.getByTestId('approve-work-entry-dwe-cable-1');
+    expect(approveBtn).toBeTruthy();
+    fireEvent.click(approveBtn);
+
+    // Confirmation modal opens
+    expect(screen.getByTestId('approve-confirm-modal')).toBeTruthy();
+    // Verify no quantity or measurement inputs exist in the modal
+    expect(screen.queryByLabelText(/measurement/i)).toBeNull();
+    expect(screen.queryByLabelText(/supervisor quantity/i)).toBeNull();
+    expect(screen.queryByRole('spinbutton')).toBeNull();
+
+    // Confirm approval
+    fireEvent.click(screen.getByTestId('confirm-approve-btn'));
+
+    await waitFor(() => {
+      expect(approveEntity).toHaveBeenCalledWith('dwe-cable-1', {
+        entity_type: 'daily_work',
+        idempotency_key: expect.any(String),
+        remarks: null,
+      });
+    });
+  });
 });
 
 // 18. formatLocalTime helper tests
@@ -1646,6 +1769,63 @@ describe('isNextDay', () => {
   it('returns true when check-out crosses midnight into next local calendar day under TZ=Asia/Kolkata', () => {
     // In UTC, both are 2026-09-26; but in Asia/Kolkata (+05:30), check-in is 26 Sep 18:15 and check-out is 27 Sep 03:00
     expect(isNextDay('2026-09-26T12:45:00Z', '2026-09-26T21:30:00Z')).toBe(true);
+  });
+});
+
+// 21. Point-to-Point Work Measurements in Supervisor Verification
+describe('Supervisor Verification - Point-to-Point Work Measurements Table', () => {
+  it('renders measurement table and total distance for work entries with measurements', async () => {
+    const detailWithMeasurements = {
+      ...mockDetail,
+      work_entries: [
+        {
+          id: 'dwe-measured-1',
+          idempotency_key: 'idemp-m-1',
+          activity_id: 'act-1',
+          activity_name: 'Fibre Cabling',
+          activity_category: 'Cabling',
+          work_order_id: 'wo-1',
+          work_order_number: 'WO-2026-001',
+          work_date: '2026-09-28',
+          quantity: '70',
+          uom: 'metres',
+          status: 'submitted',
+          remarks: '70m cabling completed',
+          verification_record_id: null,
+          verification_action: null,
+          verification_remarks: null,
+          history: [],
+          photos: [],
+          measurements: [
+            { start_point: 'P1', end_point: 'P2', distance: 50 },
+            { start_point: 'P2', end_point: 'P3', distance: 20 },
+          ],
+        },
+      ],
+    };
+
+    (getEmployeeDayDetail as any).mockResolvedValue(detailWithMeasurements);
+
+    renderWithRouter('supervisor');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('entry-measurements-container-dwe-measured-1')).toBeInTheDocument();
+      expect(screen.getByText(/Point-to-Point Work Measurements \(2 spans\)/i)).toBeInTheDocument();
+      expect(screen.getByTestId('supervisor-measurement-start-0')).toHaveTextContent('P1');
+      expect(screen.getByTestId('supervisor-measurement-end-0')).toHaveTextContent('P2');
+      expect(screen.getByTestId('supervisor-measurement-distance-0')).toHaveTextContent('50 m');
+      expect(screen.getByTestId('supervisor-measurement-start-1')).toHaveTextContent('P2');
+      expect(screen.getByTestId('supervisor-measurement-end-1')).toHaveTextContent('P3');
+      expect(screen.getByTestId('supervisor-measurement-distance-1')).toHaveTextContent('20 m');
+      expect(screen.getByTestId('supervisor-measurements-total-value')).toHaveTextContent('70 metres');
+    });
+
+    // Supervisor has Approve / Reject buttons
+    expect(screen.getByTestId('approve-work-entry-dwe-measured-1')).toBeInTheDocument();
+    expect(screen.getByTestId('reject-work-entry-dwe-measured-1')).toBeInTheDocument();
+
+    // No supervisor measurement input exists (read-only verification of measured work)
+    expect(screen.queryByPlaceholderText('e.g. P1')).toBeNull();
   });
 });
 

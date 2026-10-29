@@ -1,16 +1,50 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { getAttendanceRecords, checkIn, checkOut, type AttendanceRecord } from '../api/attendance';
+import { getDailyWorkEntries, type DailyWorkEntry } from '../api/dailyWork';
 import { normalizeError } from '../api/client';
 import { MapPin, LogIn, LogOut, Loader2, AlertCircle, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import styles from './AttendancePage.module.css';
 import { AxiosError } from 'axios';
 import { useAuth } from '../context/AuthContext';
 
+export const checkSessionDailyWorkStatus = (
+  entries: DailyWorkEntry[],
+  attendanceRecordId?: string | null,
+  workDate?: string
+): { requiresConfirmation: boolean; warning?: string } => {
+  const sessionEntries = entries.filter((e) => {
+    if (attendanceRecordId && e.attendance_record_id) {
+      return e.attendance_record_id === attendanceRecordId;
+    }
+    if (workDate) {
+      return e.work_date === workDate || e.date === workDate;
+    }
+    return true;
+  });
+
+  if (!sessionEntries || sessionEntries.length === 0) {
+    return {
+      requiresConfirmation: true,
+      warning: 'No daily work entries submitted for this session. Please confirm check-out.',
+    };
+  }
+
+  if (sessionEntries.some((entry) => entry.status === 'draft')) {
+    return {
+      requiresConfirmation: true,
+      warning: 'You have unsubmitted draft work entries. Please confirm check-out.',
+    };
+  }
+
+  return { requiresConfirmation: false };
+};
+
 export const AttendancePage: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const hasActiveSites = Boolean(user?.active_sites && user.active_sites.length > 0);
   const { location, error: geoError, loading: geoLoading, getLocation } = useGeolocation();
@@ -51,10 +85,7 @@ export const AttendancePage: React.FC = () => {
   const latestRecord = sortedRecords.length > 0 ? sortedRecords[0] : null;
   const isCheckedIn = latestRecord ? latestRecord.check_out_time === null : false;
 
-  const handleAction = async (type: 'check-in' | 'check-out') => {
-    if (submitting) return;
-
-    // We must have a location
+  const performCheckout = async () => {
     if (!location) {
       if (geoError) {
         setActionError(`Cannot proceed: ${geoError}. Please enable GPS and try again.`);
@@ -70,22 +101,9 @@ export const AttendancePage: React.FC = () => {
     setSuccessMsg(null);
 
     try {
-      if (type === 'check-in') {
-        await checkIn({ latitude: location.latitude, longitude: location.longitude });
-        setSuccessMsg('Successfully checked in!');
-        await fetchRecords();
-      } else {
-        const res = await checkOut({ latitude: location.latitude, longitude: location.longitude });
-        if (res.requires_confirmation) {
-          setCheckoutWarning(
-            res.warning || 'No daily work entries submitted for this session. Please confirm check-out.'
-          );
-          setShowWarningModal(true);
-        } else {
-          setSuccessMsg('Successfully checked out!');
-          await fetchRecords();
-        }
-      }
+      await checkOut({ latitude: location.latitude, longitude: location.longitude });
+      setSuccessMsg('Successfully checked out!');
+      await fetchRecords();
     } catch (err) {
       const normalized = normalizeError(err as AxiosError<any>);
       setActionError(normalized.message);
@@ -94,10 +112,97 @@ export const AttendancePage: React.FC = () => {
     }
   };
 
-  const handleDismissWarning = async () => {
+  const handleAction = async (type: 'check-in' | 'check-out') => {
+    if (submitting) return;
+
+    // We must have a location
+    if (!location) {
+      if (geoError) {
+        setActionError(`Cannot proceed: ${geoError}. Please enable GPS and try again.`);
+      } else {
+        setActionError('Acquiring GPS location... Please wait and try again.');
+        getLocation();
+      }
+      return;
+    }
+
+    if (type === 'check-in') {
+      setSubmitting(true);
+      setActionError(null);
+      setSuccessMsg(null);
+      try {
+        await checkIn({ latitude: location.latitude, longitude: location.longitude });
+        setSuccessMsg('Successfully checked in!');
+        await fetchRecords();
+      } catch (err) {
+        const normalized = normalizeError(err as AxiosError<any>);
+        setActionError(normalized.message);
+      } finally {
+        setSubmitting(false);
+      }
+    } else {
+      // Step 1: Pre-checkout check for daily work submission
+      setSubmitting(true);
+      setActionError(null);
+      setSuccessMsg(null);
+
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        let workEntries: DailyWorkEntry[] = [];
+        try {
+          workEntries = await getDailyWorkEntries(today);
+        } catch (e) {
+          console.warn('Failed to fetch daily work entries during checkout check', e);
+        }
+
+        const workStatus = checkSessionDailyWorkStatus(
+          workEntries,
+          latestRecord?.id,
+          today
+        );
+
+        if (workStatus.requiresConfirmation) {
+          setCheckoutWarning(
+            workStatus.warning || 'No daily work entries submitted for this session. Please confirm check-out.'
+          );
+          setShowWarningModal(true);
+          setSubmitting(false);
+          return;
+        }
+
+        // Step 2: Daily work is submitted, proceed with checkout
+        await performCheckout();
+      } catch (err) {
+        const normalized = normalizeError(err as AxiosError<any>);
+        setActionError(normalized.message);
+        setSubmitting(false);
+      }
+    }
+  };
+
+  const handleCloseWarningModal = () => {
     setShowWarningModal(false);
-    setSuccessMsg('Successfully checked out!');
-    await fetchRecords();
+    setCheckoutWarning(null);
+  };
+
+  const handleCompleteDailyWork = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setShowWarningModal(false);
+    setCheckoutWarning(null);
+    navigate('/daily-work');
+  };
+
+  const handleConfirmCheckoutAnyway = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setShowWarningModal(false);
+    setCheckoutWarning(null);
+    await performCheckout();
   };
 
   return (
@@ -209,7 +314,7 @@ export const AttendancePage: React.FC = () => {
               <button
                 type="button"
                 className={styles.closeBtn}
-                onClick={handleDismissWarning}
+                onClick={handleCloseWarningModal}
                 aria-label="Close modal"
               >
                 <X size={20} />
@@ -231,15 +336,19 @@ export const AttendancePage: React.FC = () => {
             </div>
 
             <div className={styles.modalFooter}>
-              <Link to="/daily-work">
-                <Button type="button" variant="primary">
-                  Complete Daily Work
-                </Button>
-              </Link>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={handleCompleteDailyWork}
+                data-testid="complete-daily-work-btn"
+              >
+                Complete Daily Work
+              </Button>
               <Button
                 type="button"
                 variant="ghost"
-                onClick={handleDismissWarning}
+                onClick={handleConfirmCheckoutAnyway}
+                data-testid="check-out-anyway-btn"
               >
                 Check out anyway
               </Button>

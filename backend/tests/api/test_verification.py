@@ -23,6 +23,7 @@ from app.models.operations import (
     WorkOrder,
     WorkPhoto,
 )
+from app.models.material_inventory import MaterialStock
 from app.models.workforce import Employee, Role
 
 
@@ -189,7 +190,12 @@ def verification_setup(sync_db_session: Session):
         bill_image_url="/uploads/bills/cleaver.jpg",
         status="submitted",
     )
-    sync_db_session.add_all([mat_cons, mat_purch])
+    stock = MaterialStock(
+        site_id=site.id,
+        material_id=material.id,
+        quantity=Decimal("10.00"),
+    )
+    sync_db_session.add_all([mat_cons, mat_purch, stock])
     sync_db_session.commit()
 
     # JWT Tokens

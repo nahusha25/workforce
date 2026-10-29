@@ -13,6 +13,8 @@ from app.models.operations import (
     Client,
     DailyWorkEntry,
     EmployeeSiteAssignment,
+    Material,
+    MaterialTransaction,
     Project,
     Site,
     WorkOrder,
@@ -581,6 +583,221 @@ async def test_submit_work_entry_rejects_unauthorized_employee():
         with pytest.raises(HTTPException) as exc_info:
             await DailyWorkService.submit_work_entry(session, entry.id, employee_id=emp2.id)
         assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_submit_work_entry_cascades_eligible_material_transactions():
+    """Transitions linked material transactions in draft and correction_required to submitted."""
+    async with TestingSessionLocal() as session:
+        data = await create_fixture_data(session)
+        emp1 = data["emp1"]
+        activity = data["activity"]
+
+        entry = await DailyWorkService.create_work_entry(
+            session, emp1.id, make_payload(activity.id, quantity=3.0)
+        )
+
+        # Create 1 draft and 1 correction_required material transaction
+        mat_draft = MaterialTransaction(
+            daily_work_entry_id=entry.id,
+            site_id=entry.site_id,
+            transaction_type="consumed",
+            item_name="Cable Cat6",
+            quantity=10.0,
+            amount=0.0,
+            status="draft",
+        )
+        mat_corr = MaterialTransaction(
+            daily_work_entry_id=entry.id,
+            site_id=entry.site_id,
+            transaction_type="purchased",
+            item_name="Connectors",
+            quantity=5.0,
+            amount=50.0,
+            status="correction_required",
+        )
+        session.add_all([mat_draft, mat_corr])
+        await session.commit()
+
+        submitted = await DailyWorkService.submit_work_entry(
+            session, entry.id, employee_id=emp1.id
+        )
+        assert submitted.status == "submitted"
+
+        # Verify child material transactions cascaded to submitted
+        res_draft = await session.execute(
+            select(MaterialTransaction).where(MaterialTransaction.id == mat_draft.id)
+        )
+        updated_draft = res_draft.scalars().first()
+        assert updated_draft.status == "submitted"
+
+        res_corr = await session.execute(
+            select(MaterialTransaction).where(MaterialTransaction.id == mat_corr.id)
+        )
+        updated_corr = res_corr.scalars().first()
+        assert updated_corr.status == "submitted"
+
+
+@pytest.mark.asyncio
+async def test_submit_work_entry_preserves_ineligible_material_transaction_statuses():
+    """Preserves already submitted, approved, and rejected material transactions while cascading draft and correction_required."""
+    async with TestingSessionLocal() as session:
+        data = await create_fixture_data(session)
+        emp1 = data["emp1"]
+        activity = data["activity"]
+
+        entry = await DailyWorkService.create_work_entry(
+            session, emp1.id, make_payload(activity.id, quantity=5.0)
+        )
+
+        mat_draft = MaterialTransaction(
+            daily_work_entry_id=entry.id,
+            site_id=entry.site_id,
+            transaction_type="consumed",
+            item_name="Draft Item",
+            quantity=1.0,
+            amount=0.0,
+            status="draft",
+        )
+        mat_corr = MaterialTransaction(
+            daily_work_entry_id=entry.id,
+            site_id=entry.site_id,
+            transaction_type="consumed",
+            item_name="Correction Item",
+            quantity=2.0,
+            amount=0.0,
+            status="correction_required",
+        )
+        mat_sub = MaterialTransaction(
+            daily_work_entry_id=entry.id,
+            site_id=entry.site_id,
+            transaction_type="consumed",
+            item_name="Already Submitted Item",
+            quantity=3.0,
+            amount=0.0,
+            status="submitted",
+        )
+        mat_app = MaterialTransaction(
+            daily_work_entry_id=entry.id,
+            site_id=entry.site_id,
+            transaction_type="consumed",
+            item_name="Approved Item",
+            quantity=4.0,
+            amount=0.0,
+            status="approved",
+        )
+        mat_rej = MaterialTransaction(
+            daily_work_entry_id=entry.id,
+            site_id=entry.site_id,
+            transaction_type="consumed",
+            item_name="Rejected Item",
+            quantity=5.0,
+            amount=0.0,
+            status="rejected",
+        )
+        session.add_all([mat_draft, mat_corr, mat_sub, mat_app, mat_rej])
+        await session.commit()
+
+        await DailyWorkService.submit_work_entry(session, entry.id, employee_id=emp1.id)
+
+        # Refresh all
+        for mat_id, expected_status in [
+            (mat_draft.id, "submitted"),
+            (mat_corr.id, "submitted"),
+            (mat_sub.id, "submitted"),
+            (mat_app.id, "approved"),
+            (mat_rej.id, "rejected"),
+        ]:
+            res = await session.execute(
+                select(MaterialTransaction).where(MaterialTransaction.id == mat_id)
+            )
+            item = res.scalars().first()
+            assert item.status == expected_status, f"Expected {expected_status} for {item.item_name}, got {item.status}"
+
+
+@pytest.mark.asyncio
+async def test_submit_work_entry_material_cascade_atomic_rollback(monkeypatch):
+    """Ensure parent and child status changes occur in the same database transaction and roll back together on failure."""
+    async with TestingSessionLocal() as session:
+        data = await create_fixture_data(session)
+        emp1 = data["emp1"]
+        activity = data["activity"]
+
+        entry = await DailyWorkService.create_work_entry(
+            session, emp1.id, make_payload(activity.id, quantity=2.0)
+        )
+        mat = MaterialTransaction(
+            daily_work_entry_id=entry.id,
+            site_id=entry.site_id,
+            transaction_type="consumed",
+            item_name="Rollback Item",
+            quantity=2.0,
+            amount=0.0,
+            status="draft",
+        )
+        session.add(mat)
+        await session.commit()
+        entry_id = entry.id
+        mat_id = mat.id
+
+    # In a new session, simulate database failure during commit
+    async with TestingSessionLocal() as session:
+        async def mock_fail_commit():
+            raise RuntimeError("Simulated DB failure on commit")
+
+        monkeypatch.setattr(session, "commit", mock_fail_commit)
+
+        with pytest.raises(RuntimeError, match="Simulated DB failure on commit"):
+            await DailyWorkService.submit_work_entry(session, entry_id, employee_id=emp1.id)
+
+    # In fresh session, verify neither parent nor child transitioned
+    async with TestingSessionLocal() as session:
+        res_entry = await session.execute(select(DailyWorkEntry).where(DailyWorkEntry.id == entry_id))
+        fresh_entry = res_entry.scalars().first()
+        assert fresh_entry.status == "draft"
+
+        res_mat = await session.execute(select(MaterialTransaction).where(MaterialTransaction.id == mat_id))
+        fresh_mat = res_mat.scalars().first()
+        assert fresh_mat.status == "draft"
+
+
+@pytest.mark.asyncio
+async def test_repeated_submission_preserves_materials():
+    """Repeated submission is rejected and preserves existing material transaction statuses."""
+    async with TestingSessionLocal() as session:
+        data = await create_fixture_data(session)
+        emp1 = data["emp1"]
+        activity = data["activity"]
+
+        entry = await DailyWorkService.create_work_entry(
+            session, emp1.id, make_payload(activity.id, quantity=2.0)
+        )
+        mat = MaterialTransaction(
+            daily_work_entry_id=entry.id,
+            site_id=entry.site_id,
+            transaction_type="consumed",
+            item_name="Test Item",
+            quantity=2.0,
+            amount=0.0,
+            status="draft",
+        )
+        session.add(mat)
+        await session.commit()
+
+        # 1. First submission succeeds
+        await DailyWorkService.submit_work_entry(session, entry.id, employee_id=emp1.id)
+        res_mat = await session.execute(select(MaterialTransaction).where(MaterialTransaction.id == mat.id))
+        assert res_mat.scalars().first().status == "submitted"
+
+        # 2. Repeated submission is rejected
+        with pytest.raises(HTTPException) as exc_info:
+            await DailyWorkService.submit_work_entry(session, entry.id, employee_id=emp1.id)
+        assert exc_info.value.status_code == 400
+        assert "submitted" in exc_info.value.detail
+
+        # Material status is still submitted
+        res_mat2 = await session.execute(select(MaterialTransaction).where(MaterialTransaction.id == mat.id))
+        assert res_mat2.scalars().first().status == "submitted"
 
 
 # ==============================================================================

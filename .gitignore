@@ -40,4 +40,7 @@ frontend/playwright-report/
 frontend/test-results/
 uploads/
 backend/uploads/
+storage/
+backend/storage/
+*.dump
 
